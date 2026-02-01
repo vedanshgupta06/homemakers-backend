@@ -43,6 +43,8 @@ public class ProviderDeduction {
     // Human explanation
     @Column(length = 255)
     private String reason;
+    @ManyToOne(optional = false)
+    private Booking booking;
 
     // Linked ONLY when payout is calculated
     @ManyToOne(fetch = FetchType.LAZY)
@@ -149,4 +151,11 @@ public class ProviderDeduction {
         this.payout = payout;
     }
 
+    public Booking getBooking() {
+        return booking;
+    }
+
+    public void setBooking(Booking booking) {
+        this.booking = booking;
+    }
 }
