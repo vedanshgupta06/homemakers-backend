@@ -6,6 +6,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/bookings/provider")
 @PreAuthorize("hasRole('PROVIDER')")
@@ -16,7 +18,10 @@ public class ProviderBookingController {
     public ProviderBookingController(BookingService bookingService) {
         this.bookingService = bookingService;
     }
-
+    @GetMapping
+    public List<Booking> getMyBookings(Authentication authentication) {
+        return bookingService.getProviderBookings(authentication.getName());
+    }
     // ============================
     // ACCEPT BOOKING
     // ============================
@@ -48,14 +53,25 @@ public class ProviderBookingController {
     // ============================
     // COMPLETE BOOKING (🔥 IMPORTANT)
     // ============================
-    @PutMapping("/{bookingId}/complete")
-    public Booking completeBooking(
+//    @PutMapping("/{bookingId}/complete")
+//    public Booking completeBooking(
+//            @PathVariable Long bookingId,
+//            Authentication authentication
+//    ) {
+//        return bookingService.completeBooking(
+//                bookingId,
+//                authentication.getName()
+//        );
+//    }
+    @PutMapping("/{bookingId}/service-done")
+    public Booking markServiceDone(
             @PathVariable Long bookingId,
             Authentication authentication
     ) {
-        return bookingService.completeBooking(
+        return bookingService.markServiceDone(
                 bookingId,
                 authentication.getName()
         );
     }
+
 }
