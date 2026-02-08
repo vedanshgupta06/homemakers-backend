@@ -22,6 +22,8 @@ public class BookingService {
     private final ProviderRepository providerRepository;
     private final ProviderEarningService providerEarningService;
     private final ServicePricingRepository pricingRepository;
+    private final ProviderLeaveSettlementService leaveSettlementService;
+    private final ProviderAutoDeductionService autoDeductionService;
 
     public BookingService(
             BookingRepository bookingRepository,
@@ -29,7 +31,9 @@ public class BookingService {
             UserRepository userRepository,
             ProviderRepository providerRepository,
             ProviderEarningService providerEarningService,
-            ServicePricingRepository pricingRepository
+            ServicePricingRepository pricingRepository,
+            ProviderLeaveSettlementService leaveSettlementService,
+            ProviderAutoDeductionService autoDeductionService
     ) {
         this.bookingRepository = bookingRepository;
         this.availabilityRepository = availabilityRepository;
@@ -37,6 +41,8 @@ public class BookingService {
         this.providerRepository = providerRepository;
         this.providerEarningService = providerEarningService;
         this.pricingRepository = pricingRepository;
+        this.leaveSettlementService = leaveSettlementService;
+        this.autoDeductionService = autoDeductionService;
     }
 
     // =========================================================
@@ -120,24 +126,62 @@ public class BookingService {
     }
 
     // =========================================================
-    // COMPLETE BOOKING (🔥 CREATES PROVIDER EARNING)
+    // mark service done  (🔥 CREATES PROVIDER EARNING)
     // =========================================================
+
     @Transactional
-    public Booking completeBooking(Long bookingId, String providerEmail) {
+    public Booking markServiceDone(Long bookingId, String providerEmail) {
 
         Booking booking = bookingRepository
                 .findByIdAndProvider_User_Email(bookingId, providerEmail)
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
 
         if (booking.getStatus() != BookingStatus.CONFIRMED) {
-            throw new RuntimeException("Only CONFIRMED bookings can be completed");
+            throw new RuntimeException("Only CONFIRMED bookings allowed");
         }
 
-        // 1️⃣ Mark booking completed
+        booking.setStatus(BookingStatus.SERVICE_DONE);
+        return bookingRepository.save(booking);
+    }
+
+    @Transactional
+    public Booking completeBookingBySystem(Long bookingId) {
+
+        Booking booking = bookingRepository
+                .findById(bookingId)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        // ✅ Only SERVICE_DONE bookings can be completed
+        if (booking.getStatus() != BookingStatus.SERVICE_DONE) {
+            throw new RuntimeException("Booking not ready for completion");
+        }
+
+        // ✅ Safety checks
+        if (booking.getChargeableDays() <= 0) {
+            throw new RuntimeException("Invalid chargeable days");
+        }
+
+        if (booking.getTotalPrice() <= 0) {
+            throw new RuntimeException("Invalid total price");
+        }
+
+        // ✅ FINAL COMPLETION
         booking.setStatus(BookingStatus.COMPLETED);
         bookingRepository.save(booking);
 
-        // 2️⃣ Create provider earning (ONCE per booking)
+        // ✅ Settle leaves
+        leaveSettlementService.settleLeaves(
+                booking.getProvider(),
+                booking
+        );
+
+        // ✅ Apply deductions
+        autoDeductionService.applyUnpaidLeaveDeductions(
+                booking.getProvider(),
+                booking
+        );
+
+        // ✅ Create earnings (ONLY HERE)
         providerEarningService.createEarning(
                 booking.getProvider(),
                 booking.getTotalPrice(),

@@ -160,15 +160,15 @@ public class BookingController {
         return bookingService.getUserBookings(email);
     }
 
-    // PROVIDER views bookings
-    @GetMapping("/provider")
-    @PreAuthorize("hasRole('PROVIDER')")
-    public List<Booking> getProviderBookings() {
-        String email = SecurityContextHolder.getContext()
-                .getAuthentication()
-                .getName();
-        return bookingService.getProviderBookings(email);
-    }
+//    // PROVIDER views bookings
+//    @GetMapping("/provider")
+//    @PreAuthorize("hasRole('PROVIDER')")
+//    public List<Booking> getProviderBookings() {
+//        String email = SecurityContextHolder.getContext()
+//                .getAuthentication()
+//                .getName();
+//        return bookingService.getProviderBookings(email);
+//    }
 
 
     @PostMapping("/preview")
