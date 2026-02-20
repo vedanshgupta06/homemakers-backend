@@ -39,7 +39,12 @@ public class ProviderReplacementService {
                 });
 
         // 2️⃣ Mark booking as partially completed
-        booking.setStatus(BookingStatus.PARTIALLY_COMPLETED);
+        // Booking remains active, do NOT change status
+        if (booking.getStatus() != BookingStatus.SERVICE_IN_PROGRESS &&
+                booking.getStatus() != BookingStatus.CONFIRMED) {
+            throw new RuntimeException("Provider replacement not allowed in current state");
+        }
+
 
         // 3️⃣ Assign new provider
         booking.setProvider(newProvider);

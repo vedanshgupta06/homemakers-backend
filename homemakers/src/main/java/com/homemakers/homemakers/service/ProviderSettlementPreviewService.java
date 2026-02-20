@@ -24,8 +24,13 @@ public class ProviderSettlementPreviewService {
     ) {
 
         long workedDays =
-                workLogRepository.countByProviderAndBookingAndStatus(
-                        provider, booking, WorkStatus.WORKED
+                workLogRepository.countByProviderAndBookingAndStatusIn(
+                        provider,
+                        booking,
+                        java.util.List.of(
+                                WorkStatus.AUTO_PRESENT,
+                                WorkStatus.PRESENT
+                        )
                 );
 
         long leaveDays =

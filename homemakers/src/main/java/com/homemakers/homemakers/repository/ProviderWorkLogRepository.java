@@ -25,5 +25,20 @@ public interface ProviderWorkLogRepository
             Booking booking,
             WorkStatus status
     );
+    List<ProviderWorkLog> findByWorkDateBetween(
+            java.time.LocalDate start,
+            java.time.LocalDate end
+    );
+
+    boolean existsByProviderAndBookingAndWorkDate(
+            Provider provider,
+            Booking booking,
+            java.time.LocalDate workDate
+    );
+    long countByProviderAndBookingAndStatusIn(
+            Provider provider,
+            Booking booking,
+            java.util.List<WorkStatus> statuses
+    );
 
 }
