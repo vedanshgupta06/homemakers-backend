@@ -6,9 +6,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
-
+import java.util.List;
+import com.homemakers.homemakers.model.BookingStatus;
 public interface BookingRepository extends JpaRepository<Booking, Long> {
 
     Optional<Booking> findByAvailabilityId(Long availabilityId);
@@ -37,4 +39,18 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     List<Booking> findCompletedMonthlyBookings(
             @Param("provider") Provider provider
     );
+    @Query("""
+    SELECT b FROM Booking b
+    WHERE b.status IN :statuses
+    AND b.workStartDate <= :date
+    AND (b.workEndDate IS NULL OR b.workEndDate >= :date)
+""")
+    List<Booking> findActiveForAttendance(
+            @Param("statuses") List<BookingStatus> statuses,
+            @Param("date") LocalDate date
+    );
+
+        List<Booking> findByStatus(BookingStatus status);
+
+
 }
