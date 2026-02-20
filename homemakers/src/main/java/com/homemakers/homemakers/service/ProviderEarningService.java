@@ -1,39 +1,69 @@
 package com.homemakers.homemakers.service;
 
 import com.homemakers.homemakers.model.*;
-import com.homemakers.homemakers.repository.BookingRepository;
 import com.homemakers.homemakers.repository.ProviderEarningRepository;
+import com.homemakers.homemakers.repository.ProviderWorkLogRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.temporal.WeekFields;
+import java.util.List;
+import java.util.Locale;
 
 @Service
 public class ProviderEarningService {
 
     private final ProviderEarningRepository earningRepository;
-    private final BookingRepository bookingRepository;
+    private final ProviderWorkLogRepository workLogRepository;
 
     public ProviderEarningService(
             ProviderEarningRepository earningRepository,
-            BookingRepository bookingRepository
+            ProviderWorkLogRepository workLogRepository
     ) {
         this.earningRepository = earningRepository;
-        this.bookingRepository = bookingRepository;
+        this.workLogRepository = workLogRepository;
     }
 
-    public ProviderEarning createEarning(
-            Provider provider,
-            double amount,
-            Long bookingId
-    ) {
-        // 🔑 FETCH BOOKING FIRST
-        Booking booking = bookingRepository.findById(bookingId)
-                .orElseThrow(() -> new RuntimeException("Booking not found"));
+    /**
+     * Generates weekly earnings based purely on attendance.
+     */
+    @Transactional
+    public void generateWeeklyEarnings(LocalDate weekStart, LocalDate weekEnd) {
 
-        ProviderEarning earning = new ProviderEarning();
-        earning.setProvider(provider);
-        earning.setBooking(booking);                 // ✅ NOW VALID
-        earning.setAmount(amount);
-        earning.setStatus(EarningStatus.PENDING);    // ✅ CORRECT ENUM
+        List<ProviderWorkLog> logs =
+                workLogRepository.findByWorkDateBetween(weekStart, weekEnd);
 
-        return earningRepository.save(earning);
+        for (ProviderWorkLog log : logs) {
+
+            if (log.getStatus() != WorkStatus.AUTO_PRESENT &&
+                    log.getStatus() != WorkStatus.PRESENT) {
+                continue;
+            }
+
+            Booking booking = log.getBooking();
+            Provider provider = log.getProvider();
+
+            double dailyRate =
+                    booking.getTotalPrice() / booking.getTotalDays();
+
+            int weekNo = log.getWorkDate()
+                    .get(WeekFields.of(Locale.getDefault()).weekOfWeekBasedYear());
+
+            // Prevent duplicate weekly earning
+            if (earningRepository.existsByProviderAndBookingAndWeekNo(
+                    provider, booking, weekNo)) {
+                continue;
+            }
+
+            ProviderEarning earning = new ProviderEarning();
+            earning.setProvider(provider);
+            earning.setBooking(booking);
+            earning.setAmount(dailyRate);
+            earning.setWeekNo(weekNo);
+            earning.setStatus(EarningStatus.AVAILABLE);
+
+            earningRepository.save(earning);
+        }
     }
 }

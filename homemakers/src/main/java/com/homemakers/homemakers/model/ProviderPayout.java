@@ -40,12 +40,16 @@ public class ProviderPayout {
 
     private LocalDateTime createdAt;
     private LocalDateTime paidAt;
+    @Version
+    private Long version;
+
 
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
-        status = PayoutStatus.CALCULATED;
+        status = PayoutStatus.INITIATED;
     }
+    private double amount;
 
     // =======================
     // GETTERS
@@ -59,7 +63,6 @@ public class ProviderPayout {
     public double getNetPayout() { return netPayout; }
     public PayoutStatus getStatus() { return status; }
     public LocalDateTime getCreatedAt() { return createdAt; }
-    public LocalDateTime getPaidAt() { return paidAt; }
 
     // =======================
     // SETTERS (SERVICE ONLY)
@@ -96,5 +99,21 @@ public class ProviderPayout {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public double getAmount() {
+        return amount;
+    }
+
+    public void setAmount(double amount) {
+        this.amount = amount;
+    }
+
+    public LocalDateTime getPaidAt() {
+        return paidAt;
+    }
+
+    public void setPaidAt(LocalDateTime paidAt) {
+        this.paidAt = paidAt;
     }
 }
