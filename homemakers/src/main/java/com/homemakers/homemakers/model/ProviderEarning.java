@@ -7,7 +7,13 @@ import java.time.LocalDateTime;
 
 
 @Entity
-@Table(name = "provider_earnings")
+@Table(
+        name = "provider_earnings",
+        uniqueConstraints = @UniqueConstraint(
+                columnNames = {"provider_id", "booking_id", "week_no"}
+        )
+)
+
 public class ProviderEarning {
 
     @Id
@@ -35,6 +41,12 @@ public class ProviderEarning {
     private EarningStatus status;
 
     private LocalDateTime createdAt;
+    @Version
+    private Long version;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payout_id")
+    private ProviderPayout payout;
+
 
     // ========================
     // LIFECYCLE
@@ -43,6 +55,8 @@ public class ProviderEarning {
     void onCreate() {
         createdAt = LocalDateTime.now();
     }
+    private int weekNo;
+
 
     // ========================
     // GETTERS
@@ -84,5 +98,37 @@ public class ProviderEarning {
 
     public void setStatus(EarningStatus status) {
         this.status = status;
+    }
+
+    public int getWeekNo() {
+        return weekNo;
+    }
+
+    public void setWeekNo(int weekNo) {
+        this.weekNo = weekNo;
+    }
+
+    public Long getVersion() {
+        return version;
+    }
+
+    public void setVersion(Long version) {
+        this.version = version;
+    }
+
+    public ProviderPayout getPayout() {
+        return payout;
+    }
+
+    public void setPayout(ProviderPayout payout) {
+        this.payout = payout;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 }
