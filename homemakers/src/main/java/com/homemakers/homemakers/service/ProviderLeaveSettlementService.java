@@ -28,9 +28,15 @@ public class ProviderLeaveSettlementService {
 
         // 1️⃣ Count worked days
         long workedDays =
-                workLogRepository.countByProviderAndBookingAndStatus(
-                        provider, booking, WorkStatus.WORKED
+                workLogRepository.countByProviderAndBookingAndStatusIn(
+                        provider,
+                        booking,
+                        java.util.List.of(
+                                WorkStatus.AUTO_PRESENT,
+                                WorkStatus.PRESENT
+                        )
                 );
+
 
         int earnedPaidLeaves = (int) Math.min(workedDays / 10, 3);
 

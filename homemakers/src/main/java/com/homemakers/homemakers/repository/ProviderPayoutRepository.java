@@ -35,6 +35,15 @@ public interface ProviderPayoutRepository
             String payoutMonth
     );
     List<ProviderPayout> findByProviderOrderByPayoutMonthDesc(Provider provider);
+    List<ProviderPayout> findByProviderOrderByCreatedAtDesc(Provider provider);
+    boolean existsByProviderAndStatus(
+            Provider provider,
+            PayoutStatus status
+    );
+    ProviderPayout findTopByProviderAndStatusOrderByPaidAtDesc(
+            Provider provider,
+            PayoutStatus status
+    );
 
 }
 

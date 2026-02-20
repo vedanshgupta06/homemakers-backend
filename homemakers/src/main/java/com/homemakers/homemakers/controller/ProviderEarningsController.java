@@ -59,11 +59,12 @@ public class ProviderEarningsController {
                 .findByUser_Email(email)
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
-        double pending = earningRepository
-                .findByProviderAndStatus(provider, EarningStatus.PENDING)
+        double available = earningRepository
+                .findByProviderAndStatus(provider, EarningStatus.AVAILABLE)
                 .stream()
                 .mapToDouble(ProviderEarning::getAmount)
                 .sum();
+
 
         double paid = earningRepository
                 .findByProviderAndStatus(provider, EarningStatus.PAID)
@@ -72,9 +73,9 @@ public class ProviderEarningsController {
                 .sum();
 
         Map<String, Double> res = new HashMap<>();
-        res.put("pending", pending);
+        res.put("pending", available);
         res.put("paid", paid);
-        res.put("total", pending + paid);
+        res.put("total", available + paid);
 
         return res;
     }
