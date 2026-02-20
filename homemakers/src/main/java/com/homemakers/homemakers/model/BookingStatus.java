@@ -1,13 +1,22 @@
 package com.homemakers.homemakers.model;
 
-
 public enum BookingStatus {
-    PENDING,
-    CONFIRMED,
-    REJECTED,
-    CANCELLED,
-    COMPLETED,
-    PARTIALLY_COMPLETED,
-    SERVICE_DONE
-}
 
+    // Customer created booking, waiting for provider
+    PENDING,
+
+    // Provider accepted, work not started yet
+    CONFIRMED,
+
+    // System-controlled: work has started (attendance running)
+    SERVICE_IN_PROGRESS,
+
+    // Provider has signaled work is finished
+    SERVICE_DONE,
+
+    // System / Admin finalized booking
+    COMPLETED,
+
+    // Booking cancelled before completion
+    CANCELLED
+}

@@ -46,7 +46,7 @@ public class PayoutCalculationService {
         List<ProviderEarning> earnings =
                 earningRepository.findByProviderAndStatus(
                         provider,
-                        EarningStatus.PENDING
+                        EarningStatus.AVAILABLE
                 );
 
         if (earnings.isEmpty()) {
@@ -81,7 +81,7 @@ public class PayoutCalculationService {
         payout.setTotalEarnings(totalEarnings);
         payout.setTotalDeductions(totalDeductions);
         payout.setNetPayout(net);
-        payout.setStatus(PayoutStatus.CALCULATED);
+        payout.setStatus(PayoutStatus.INITIATED);
 
         ProviderPayout savedPayout = payoutRepository.save(payout);
 

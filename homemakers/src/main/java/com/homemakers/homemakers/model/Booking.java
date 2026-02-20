@@ -1,7 +1,10 @@
 package com.homemakers.homemakers.model;
 
 import jakarta.persistence.*;
+
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 @Entity
 @Table(name = "bookings",
@@ -43,6 +46,11 @@ public class Booking {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime completedAt;
+    private LocalDate workStartDate;   // set once
+    private LocalDate workEndDate;     // optional, system set
+    private LocalDateTime getCreatedAt;
+
+
     @PrePersist
     void onCreate() {
         createdAt = LocalDateTime.now();
@@ -157,6 +165,38 @@ public class Booking {
     public void setCompletedAt(LocalDateTime completedAt) {
         this.completedAt = completedAt;
     }
+
+    public LocalDate getWorkStartDate() {
+        return workStartDate;
+    }
+
+    public void markWorkStarted(LocalDate date) {
+        if (this.workStartDate != null) {
+            throw new IllegalStateException("Work start already set");
+        }
+        this.workStartDate = date;
+    }
+
+
+    public LocalDate getWorkEndDate() {
+        return workEndDate;
+    }
+
+    public void markWorkEnded(LocalDate date) {
+        if (this.workEndDate != null) {
+            throw new IllegalStateException("Work end already set");
+        }
+        this.workEndDate = date;
+    }
+
+    public LocalDateTime getGetCreatedAt() {
+        return getCreatedAt;
+    }
+
+    public void setGetCreatedAt(LocalDateTime getCreatedAt) {
+        this.getCreatedAt = getCreatedAt;
+    }
+
 
     // getters/setters
 }
