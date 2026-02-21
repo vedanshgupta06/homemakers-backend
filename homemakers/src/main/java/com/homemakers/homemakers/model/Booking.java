@@ -177,7 +177,6 @@ public class Booking {
         this.workStartDate = date;
     }
 
-
     public LocalDate getWorkEndDate() {
         return workEndDate;
     }
@@ -196,7 +195,6 @@ public class Booking {
     public void setGetCreatedAt(LocalDateTime getCreatedAt) {
         this.getCreatedAt = getCreatedAt;
     }
-
 
     // getters/setters
 }
