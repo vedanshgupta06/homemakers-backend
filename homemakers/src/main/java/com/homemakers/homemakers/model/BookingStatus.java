@@ -18,5 +18,7 @@ public enum BookingStatus {
     COMPLETED,
 
     // Booking cancelled before completion
-    CANCELLED
+    CANCELLED,
+
+    SERVICE_STOPPED_BY_ADMIN
 }
