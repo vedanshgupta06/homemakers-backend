@@ -31,7 +31,7 @@ public class ProviderEarning {
     private Booking booking;
 
     // ========================
-    // EARNING DATA
+    // EARNING DATA of providers
     // ========================
     @Column(nullable = false)
     private double amount;
