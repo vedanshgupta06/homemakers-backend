@@ -9,6 +9,7 @@ import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 @Service
@@ -19,23 +20,26 @@ public class BookingService {
     private final UserRepository userRepository;
     private final ProviderRepository providerRepository;
     private final ServicePricingRepository pricingRepository;
+    private final ProviderLeaveLedgerRepository leaveLedgerRepository;
 
     public BookingService(
             BookingRepository bookingRepository,
             ProviderAvailabilityRepository availabilityRepository,
             UserRepository userRepository,
             ProviderRepository providerRepository,
-            ServicePricingRepository pricingRepository
+            ServicePricingRepository pricingRepository,
+            ProviderLeaveLedgerRepository leaveLedgerRepository
     ) {
         this.bookingRepository = bookingRepository;
         this.availabilityRepository = availabilityRepository;
         this.userRepository = userRepository;
         this.providerRepository = providerRepository;
         this.pricingRepository = pricingRepository;
+        this.leaveLedgerRepository = leaveLedgerRepository;
     }
 
     // =========================================================
-    // CREATE BOOKING (NO MONEY LOGIC)
+    // CREATE BOOKING
     // =========================================================
     @Transactional
     public Booking createBooking(BookingRequest request, String userEmail) {
@@ -89,7 +93,6 @@ public class BookingService {
         booking.setHoursPerDay(hasHourlyService ? request.getHoursPerDay() : null);
         booking.setStatus(BookingStatus.PENDING);
 
-        // 🔒 Lock slot
         slot.setActive(false);
         availabilityRepository.save(slot);
 
@@ -97,7 +100,7 @@ public class BookingService {
     }
 
     // =========================================================
-    // ACCEPT BOOKING (SYSTEM CONTROLS START DATE)
+    // ACCEPT BOOKING
     // =========================================================
     @Transactional
     public Booking acceptBooking(Long bookingId, String providerEmail) {
@@ -112,15 +115,14 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.CONFIRMED);
 
-        // 🔒 CRITICAL: system-controlled work start date
+        // Work starts next day
         booking.markWorkStarted(LocalDate.now().plusDays(1));
-
 
         return bookingRepository.save(booking);
     }
 
     // =========================================================
-    // PROVIDER SIGNALS SERVICE DONE (NO MONEY EFFECT)
+    // PROVIDER DONE
     // =========================================================
     @Transactional
     public Booking markServiceDone(Long bookingId, String providerEmail) {
@@ -137,12 +139,11 @@ public class BookingService {
         booking.setStatus(BookingStatus.SERVICE_DONE);
         booking.markWorkEnded(LocalDate.now());
 
-
         return bookingRepository.save(booking);
     }
 
     // =========================================================
-    // SYSTEM / ADMIN COMPLETION (NO MONEY LOGIC)
+    // SYSTEM COMPLETE
     // =========================================================
     @Transactional
     public Booking completeBookingBySystem(Long bookingId) {
@@ -152,7 +153,7 @@ public class BookingService {
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
 
         if (booking.getStatus() != BookingStatus.SERVICE_DONE) {
-            throw new RuntimeException("Booking not ready for completion");
+            throw new RuntimeException("Booking not ready");
         }
 
         booking.setStatus(BookingStatus.COMPLETED);
@@ -162,7 +163,7 @@ public class BookingService {
     }
 
     // =========================================================
-    // REJECT BOOKING
+    // REJECT
     // =========================================================
     @Transactional
     public Booking rejectBooking(Long bookingId, String providerEmail) {
@@ -185,23 +186,65 @@ public class BookingService {
     }
 
     // =========================================================
-    // FETCH
+    // FETCH USER BOOKINGS
     // =========================================================
     public List<Booking> getUserBookings(String email) {
         return bookingRepository.findByUser_Email(email);
     }
 
+    // =========================================================
+    // FETCH PROVIDER BOOKINGS (🔥 DYNAMIC CALCULATION)
+    // =========================================================
     public List<Booking> getProviderBookings(String providerEmail) {
 
         Provider provider = providerRepository
                 .findByUser_Email(providerEmail)
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
-        return bookingRepository.findByProvider(provider);
+        List<Booking> bookings = bookingRepository.findByProvider(provider);
+
+        for (Booking booking : bookings) {
+
+            if (booking.getWorkStartDate() != null &&
+                    booking.getStatus() == BookingStatus.SERVICE_IN_PROGRESS) {
+
+                int totalDays = (int) ChronoUnit.DAYS.between(
+                        booking.getWorkStartDate(),
+                        LocalDate.now()
+                );
+
+                booking.setTotalDays(totalDays);
+
+                int paidLeaves =
+                        leaveLedgerRepository.countByBooking_IdAndLeaveType(
+                                booking.getId(),
+                                LeaveType.PAID
+                        );
+
+                int unpaidLeaves =
+                        leaveLedgerRepository.countByBooking_IdAndLeaveType(
+                                booking.getId(),
+                                LeaveType.UNPAID
+                        );
+
+                int allowedPaidLeaves = 3;
+
+                int extraUnpaidFromPaid =
+                        Math.max(0, paidLeaves - allowedPaidLeaves);
+
+                int finalUnpaidLeaves =
+                        unpaidLeaves + extraUnpaidFromPaid;
+
+                booking.setHolidays(Math.min(paidLeaves, allowedPaidLeaves));
+                booking.setChargeableDays(totalDays - finalUnpaidLeaves);
+            }
+        }
+
+        return bookings;
     }
 
     // =========================================================
-    // PRICE PREVIEW (SAFE)
+    // PRICE PREVIEW
     // =========================================================
     public BookingPricePreviewResponse previewBookingPrice(
             BookingPricePreviewRequest request
