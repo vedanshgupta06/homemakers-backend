@@ -15,7 +15,12 @@ public interface ProviderLeaveLedgerRepository
             Provider provider,
             Booking booking
     );
+    int countByBookingId(Long bookingId);
 
+    int countByBooking_IdAndLeaveType(
+            Long bookingId,
+            LeaveType leaveType
+    );
     long countByProviderAndBookingAndLeaveType(
             Provider provider,
             Booking booking,
