@@ -13,6 +13,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
@@ -32,9 +33,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
         http
-                .cors()
-                .and()
                 .csrf(csrf -> csrf.disable())
+                .cors(cors -> {})   // ✅ Spring Security 6 style
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
@@ -46,21 +46,25 @@ public class SecurityConfig {
                         // PUBLIC
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/users/register").permitAll()
-                        // ADMIN
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // AVAILABILITY (USER + PROVIDER)
-                        .requestMatchers("/api/provider/availability/**")
-                        .hasAnyRole("USER", "PROVIDER")
+                        // ADMIN
+                        .requestMatchers("/api/admin/**")
+                        .hasRole("ADMIN")
 
                         // PROVIDER
-                        .requestMatchers("/api/bookings/provider/**")
+                        .requestMatchers("/api/provider/**")
                         .hasRole("PROVIDER")
 
+                        // BOOKINGS (USER + PROVIDER + ADMIN)
+                        .requestMatchers("/api/bookings/**")
+                        .hasAnyRole("USER", "PROVIDER", "ADMIN")
+
                         // USER
-                        .requestMatchers("/api/providers/**").hasRole("USER")
-                        .requestMatchers("/api/bookings/**").hasRole("USER")
-                        .requestMatchers("/api/reviews/**").hasRole("USER")
+                        .requestMatchers("/api/providers/**")
+                        .hasRole("USER")
+
+                        .requestMatchers("/api/reviews/**")
+                        .hasRole("USER")
 
                         .anyRequest().authenticated()
                 )
