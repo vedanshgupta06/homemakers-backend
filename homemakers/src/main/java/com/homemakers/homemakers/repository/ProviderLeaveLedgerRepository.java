@@ -41,5 +41,11 @@ public interface ProviderLeaveLedgerRepository
             @Param("provider") Provider provider,
             @Param("date") LocalDate date
     );
-
+    long countByProviderAndBookingAndLeaveTypeAndLeaveDateBetween(
+            Provider provider,
+            Booking booking,
+            LeaveType leaveType,
+            LocalDate start,
+            LocalDate end
+    );
 }
