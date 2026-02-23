@@ -39,9 +39,9 @@ public class Booking {
     @Enumerated(EnumType.STRING)
     private BookingStatus status = BookingStatus.PENDING;
 
-    private int totalDays = 30;
-    private int holidays = 3;
-    private int chargeableDays = 27;
+    private int totalDays ;
+    private int holidays ;
+    private int chargeableDays ;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
