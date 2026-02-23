@@ -205,8 +205,7 @@ public class BookingService {
 
         for (Booking booking : bookings) {
 
-            if (booking.getWorkStartDate() != null &&
-                    booking.getStatus() == BookingStatus.SERVICE_IN_PROGRESS) {
+            if (booking.getWorkStartDate() != null) {
 
                 int totalDays = (int) ChronoUnit.DAYS.between(
                         booking.getWorkStartDate(),
