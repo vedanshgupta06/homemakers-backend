@@ -8,7 +8,8 @@ public class WalletSummaryDTO {
     private double requested;
     private double paid;
     private LocalDateTime lastPayoutDate;
-
+    private boolean canWithdraw;
+    private LocalDateTime nextEligibleWithdrawalDate;
     public double getAvailable() { return available; }
     public void setAvailable(double available) { this.available = available; }
 
@@ -21,5 +22,22 @@ public class WalletSummaryDTO {
     public LocalDateTime getLastPayoutDate() { return lastPayoutDate; }
     public void setLastPayoutDate(LocalDateTime lastPayoutDate) {
         this.lastPayoutDate = lastPayoutDate;
+    }
+
+    public boolean isCanWithdraw() {
+        return canWithdraw;
+    }
+
+    public LocalDateTime getNextEligibleWithdrawalDate() {
+        return nextEligibleWithdrawalDate;
+    }
+
+
+    public void setCanWithdraw(boolean canWithdraw) {
+        this.canWithdraw = canWithdraw;
+    }
+
+    public void setNextEligibleWithdrawalDate(LocalDateTime nextEligibleWithdrawalDate) {
+        this.nextEligibleWithdrawalDate = nextEligibleWithdrawalDate;
     }
 }
