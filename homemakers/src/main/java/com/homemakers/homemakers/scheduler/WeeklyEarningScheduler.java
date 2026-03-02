@@ -26,10 +26,10 @@ public class WeeklyEarningScheduler {
                 .with(DayOfWeek.MONDAY);
         LocalDate lastWeekEnd = lastWeekStart.plusDays(6);
 
-        earningService.generateWeeklyEarnings(
-                lastWeekStart,
-                lastWeekEnd
-        );
+//        earningService.generateWeeklyEarnings(
+//                lastWeekStart,
+//                lastWeekEnd
+//        );
     }
 }
 
