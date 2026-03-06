@@ -1,5 +1,6 @@
 package com.homemakers.homemakers.controller;
 
+import com.homemakers.homemakers.dto.ProviderAttendanceDTO;
 import com.homemakers.homemakers.model.Provider;
 import com.homemakers.homemakers.repository.ProviderRepository;
 import com.homemakers.homemakers.repository.ProviderWorkLogRepository;
@@ -10,9 +11,12 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 @RestController
 @RequestMapping("/api/provider/attendance")
 @CrossOrigin
+@PreAuthorize("hasRole('PROVIDER')")
 public class ProviderAttendanceController {
 
     private final ProviderWorkLogService workLogService;
@@ -55,8 +59,18 @@ public class ProviderAttendanceController {
                 .findByUserEmail(email)
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
-        return ResponseEntity.ok(
-                workLogRepository.findByProviderAndWorkDate(provider, LocalDate.now())
-        );
+        var logs = workLogRepository
+                .findByProviderAndWorkDate(provider, LocalDate.now())
+                .stream()
+                .map(log -> new ProviderAttendanceDTO(
+                        log.getId(),
+                        log.getBooking().getId(),
+                        log.getBooking().getUser().getName(),
+                        log.getWorkDate(),
+                        log.getStatus()
+                ))
+                .toList();
+
+        return ResponseEntity.ok(logs);
     }
 }
