@@ -2,6 +2,7 @@ package com.homemakers.homemakers.service.attendance;
 
 import com.homemakers.homemakers.model.*;
 import com.homemakers.homemakers.repository.*;
+import com.homemakers.homemakers.service.ProviderLeaveSettlementService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,15 +15,18 @@ public class AttendanceGenerationService {
     private final BookingRepository bookingRepository;
     private final ProviderWorkLogRepository workLogRepository;
     private final ProviderLeaveLedgerRepository leaveLedgerRepository;
+    private final ProviderLeaveSettlementService leaveSettlementService;
 
     public AttendanceGenerationService(
             BookingRepository bookingRepository,
             ProviderWorkLogRepository workLogRepository,
-            ProviderLeaveLedgerRepository leaveLedgerRepository
+            ProviderLeaveLedgerRepository leaveLedgerRepository,
+            ProviderLeaveSettlementService leaveSettlementService
     ) {
         this.bookingRepository = bookingRepository;
         this.workLogRepository = workLogRepository;
         this.leaveLedgerRepository = leaveLedgerRepository;
+        this.leaveSettlementService = leaveSettlementService;
     }
 
     @Transactional
@@ -37,11 +41,11 @@ public class AttendanceGenerationService {
                         date
                 );
 
-
         for (Booking booking : activeBookings) {
 
             Provider provider = booking.getProvider();
 
+            // Prevent duplicate log
             if (workLogRepository.existsByProviderAndBookingAndWorkDate(
                     provider, booking, date)) {
                 continue;
@@ -49,10 +53,11 @@ public class AttendanceGenerationService {
 
             WorkStatus status;
 
-            if (leaveLedgerRepository.existsApprovedLeave(provider, date)) {
+            // Check approved leave for this booking
+            if (leaveLedgerRepository.existsApprovedLeave(provider, booking, date)) {
                 status = WorkStatus.LEAVE;
             } else {
-                status = WorkStatus.AUTO_PRESENT;
+                status = WorkStatus.PENDING;
             }
 
             ProviderWorkLog log = new ProviderWorkLog();
@@ -62,6 +67,9 @@ public class AttendanceGenerationService {
             log.setStatus(status);
 
             workLogRepository.save(log);
+
+            // settle leave balance
+            leaveSettlementService.settleLeaves(provider, booking);
         }
     }
 }
