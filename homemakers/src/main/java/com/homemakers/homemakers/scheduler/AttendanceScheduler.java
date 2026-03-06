@@ -21,9 +21,10 @@ public class AttendanceScheduler {
      * Runs daily after midnight.
      * Generates attendance for the PREVIOUS day.
      */
-    @Scheduled(cron = "0 10 0 * * ?")
+//    @Scheduled(cron = "0 10 0 * * ?")
+    @Scheduled(cron = "*/30 * * * * *")
     public void generateDailyAttendance() {
-        LocalDate attendanceDate = LocalDate.now().minusDays(1);
+        LocalDate attendanceDate = LocalDate.now();
         attendanceGenerationService.generateDailyAttendance(attendanceDate);
     }
 }
