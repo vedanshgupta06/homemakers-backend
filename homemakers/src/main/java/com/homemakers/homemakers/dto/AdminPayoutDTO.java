@@ -10,6 +10,12 @@ public class AdminPayoutDTO {
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime paidAt;
+    private String providerName;
+    private String providerEmail;
+    private Long bookingId;
+    private String serviceName;
+    private Integer weekNo;
+
 
     // Getters & Setters
 
@@ -30,4 +36,44 @@ public class AdminPayoutDTO {
 
     public LocalDateTime getPaidAt() { return paidAt; }
     public void setPaidAt(LocalDateTime paidAt) { this.paidAt = paidAt; }
+
+    public String getProviderName() {
+        return providerName;
+    }
+
+    public void setProviderName(String providerName) {
+        this.providerName = providerName;
+    }
+
+    public String getProviderEmail() {
+        return providerEmail;
+    }
+
+    public void setProviderEmail(String providerEmail) {
+        this.providerEmail = providerEmail;
+    }
+
+    public Long getBookingId() {
+        return bookingId;
+    }
+
+    public void setBookingId(Long bookingId) {
+        this.bookingId = bookingId;
+    }
+
+    public String getServiceName() {
+        return serviceName;
+    }
+
+    public void setServiceName(String serviceName) {
+        this.serviceName = serviceName;
+    }
+
+    public Integer getWeekNo() {
+        return weekNo;
+    }
+
+    public void setWeekNo(Integer weekNo) {
+        this.weekNo = weekNo;
+    }
 }
