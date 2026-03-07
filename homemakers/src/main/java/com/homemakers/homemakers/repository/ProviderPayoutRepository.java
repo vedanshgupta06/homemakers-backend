@@ -1,7 +1,9 @@
 package com.homemakers.homemakers.repository;
 
 import com.homemakers.homemakers.model.*;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -44,7 +46,9 @@ public interface ProviderPayoutRepository
             Provider provider,
             PayoutStatus status
     );
-
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM ProviderPayout p WHERE p.id = :id")
+    Optional<ProviderPayout> findByIdForUpdate(@Param("id") Long id);
 }
 
 

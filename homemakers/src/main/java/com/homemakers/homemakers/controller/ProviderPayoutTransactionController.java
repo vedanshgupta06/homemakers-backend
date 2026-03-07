@@ -25,7 +25,7 @@ public class ProviderPayoutTransactionController {
     // ===============================
     // REQUEST WEEKLY PAYOUT
     // ===============================
-    @PostMapping("/request")
+//    @PostMapping("/request")
     public ProviderPayoutTransaction requestPayout(
             @RequestBody RequestPayoutRequest request
     ) {
