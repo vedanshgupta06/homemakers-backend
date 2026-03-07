@@ -7,7 +7,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-
+import java.time.LocalDateTime;
+import java.time.LocalDate;
 @Service
 public class ProviderPayoutService {
 
@@ -25,17 +26,18 @@ public class ProviderPayoutService {
     @Transactional
     public ProviderPayout requestPayout(Provider provider) {
 
-        // 🔒 LOCK AVAILABLE EARNINGS
-        List<ProviderEarning> available =
-                earningRepository.findAvailableForUpdate(provider);
+        // 🔒 Weekly withdrawal enforcement
+        if (provider.getLastPayoutRequestedAt() != null) {
 
-        if (available.isEmpty()) {
-            throw new RuntimeException("No earnings available for withdrawal");
+            LocalDateTime nextAllowedDate =
+                    provider.getLastPayoutRequestedAt().plusDays(7);
+
+            if (LocalDateTime.now().isBefore(nextAllowedDate)) {
+                throw new RuntimeException(
+                        "You can request payout only once every 7 days"
+                );
+            }
         }
-
-        double total = available.stream()
-                .mapToDouble(ProviderEarning::getAmount)
-                .sum();
 
         // 🔐 Prevent duplicate INITIATED payout
         boolean alreadyInitiated =
@@ -48,22 +50,40 @@ public class ProviderPayoutService {
             throw new RuntimeException("Payout already initiated");
         }
 
+        // 🔒 Lock available earnings
+        List<ProviderEarning> available =
+                earningRepository.findAvailableForUpdate(provider);
+
+        if (available.isEmpty()) {
+            throw new RuntimeException("No earnings available for withdrawal");
+        }
+
+        double total = available.stream()
+                .mapToDouble(ProviderEarning::getAmount)
+                .sum();
+
         ProviderPayout payout = new ProviderPayout();
         payout.setProvider(provider);
         payout.setAmount(total);
         payout.setStatus(PayoutStatus.INITIATED);
-
+        payout.setPayoutMonth(LocalDate.now().getMonth().name());
         payoutRepository.save(payout);
 
-        // 🔁 Move earnings → REQUESTED and link payout
+        // 🔁 Move earnings → REQUESTED
         for (ProviderEarning earning : available) {
             earning.setStatus(EarningStatus.REQUESTED);
-            earning.setPayout(payout); // VERY IMPORTANT
+            earning.setPayout(payout);
         }
 
         earningRepository.saveAll(available);
 
+        // 🕒 Update last payout request timestamp
+        provider.setLastPayoutRequestedAt(LocalDateTime.now());
+
         return payout;
+    }
+    public List<ProviderPayout> getPayoutHistory(Provider provider) {
+        return payoutRepository.findByProviderOrderByCreatedAtDesc(provider);
     }
 
 }
