@@ -41,31 +41,55 @@ public class SecurityConfig {
                 .exceptionHandling(ex ->
                         ex.authenticationEntryPoint(jwtAuthEntryPoint)
                 )
+//                .authorizeHttpRequests(auth -> auth
+//
+//                        // PUBLIC
+//                        .requestMatchers("/api/auth/**").permitAll()
+//                        .requestMatchers("/api/users/register").permitAll()
+//
+//                        // ADMIN
+//                        .requestMatchers("/api/admin/**")
+//                        .hasRole("ADMIN")
+//
+//                        // PROVIDER
+//                        .requestMatchers("/api/provider/**")
+//                        .hasRole("PROVIDER")
+//
+//                        // BOOKINGS (USER + PROVIDER + ADMIN)
+//                        .requestMatchers("/api/providers","/api/bookings/**").authenticated()
+//
+//                        // USER
+//                        .requestMatchers("/api/providers/**")
+//                        .hasRole("USER")
+//
+//                        .requestMatchers("/api/reviews/**")
+//                        .hasRole("USER")
+//
+//                        .anyRequest().authenticated()
+//                )
                 .authorizeHttpRequests(auth -> auth
 
                         // PUBLIC
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/users/register").permitAll()
-
+                        //webhook
+                        .requestMatchers("/api/payments/webhook").permitAll()
                         // ADMIN
-                        .requestMatchers("/api/admin/**")
-                        .hasRole("ADMIN")
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // PROVIDER
-                        .requestMatchers("/api/provider/**")
-                        .hasRole("PROVIDER")
+                        // USER SEARCH PROVIDERS
+                        .requestMatchers("/api/provider/search").hasRole("USER")
 
-                        // BOOKINGS (USER + PROVIDER + ADMIN)
-                        .requestMatchers("/api/bookings/**")
-                        .hasAnyRole("USER", "PROVIDER", "ADMIN")
+                        // PROVIDER SELF APIs
+                        .requestMatchers("/api/provider/me/**").hasRole("PROVIDER")
 
-                        // USER
-                        .requestMatchers("/api/providers/**")
-                        .hasRole("USER")
+                        // BOOKINGS
+                        .requestMatchers("/api/bookings/**").hasAnyRole("USER", "PROVIDER", "ADMIN")
 
-                        .requestMatchers("/api/reviews/**")
-                        .hasRole("USER")
-
+                        // REVIEWS
+                        .requestMatchers("/api/reviews/**").hasRole("USER")
+                        // User Payment
+                        .requestMatchers("/api/payments/**").hasRole("USER")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(
@@ -87,4 +111,5 @@ public class SecurityConfig {
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
+
 }
