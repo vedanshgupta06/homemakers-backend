@@ -48,4 +48,23 @@ public interface ProviderLeaveLedgerRepository
             LocalDate start,
             LocalDate end
     );
+    boolean existsByProviderAndBookingAndLeaveDateAndLeaveType(
+            Provider provider,
+            Booking booking,
+            LocalDate leaveDate,
+            LeaveType leaveType
+    );
+    @Query("""
+SELECT COUNT(l) > 0
+FROM ProviderLeaveLedger l
+WHERE l.provider = :provider
+AND l.booking = :booking
+AND l.leaveDate = :date
+AND l.leaveType = 'PAID'
+""")
+    boolean existsApprovedLeave(
+            Provider provider,
+            Booking booking,
+            LocalDate date
+    );
 }
