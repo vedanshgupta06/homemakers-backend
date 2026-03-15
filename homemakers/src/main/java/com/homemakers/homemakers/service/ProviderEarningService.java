@@ -1,108 +1,111 @@
 package com.homemakers.homemakers.service;
 
 import com.homemakers.homemakers.model.*;
+import com.homemakers.homemakers.repository.BookingRepository;
 import com.homemakers.homemakers.repository.ProviderEarningRepository;
 import com.homemakers.homemakers.repository.ProviderLeaveLedgerRepository;
-import com.homemakers.homemakers.repository.ProviderWorkLogRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.time.temporal.WeekFields;
-import java.util.*;
 
 @Service
 public class ProviderEarningService {
 
     private final ProviderEarningRepository earningRepository;
-    private final ProviderWorkLogRepository workLogRepository;
     private final ProviderLeaveLedgerRepository leaveLedgerRepository;
+    private final BookingRepository bookingRepository;
 
     public ProviderEarningService(
             ProviderEarningRepository earningRepository,
-            ProviderWorkLogRepository workLogRepository,
-            ProviderLeaveLedgerRepository leaveLedgerRepository
+            ProviderLeaveLedgerRepository leaveLedgerRepository,
+            BookingRepository bookingRepository
     ) {
         this.earningRepository = earningRepository;
-        this.workLogRepository = workLogRepository;
         this.leaveLedgerRepository = leaveLedgerRepository;
+        this.bookingRepository = bookingRepository;
     }
 
-    /**
-     * Generates weekly earnings including PAID leaves.
-     */
     @Transactional
-    public void generateWeeklyEarnings(LocalDate weekStart, LocalDate weekEnd) {
+    public void generateDailyEarning(ProviderWorkLog log) {
 
-        List<ProviderWorkLog> logs =
-                workLogRepository.findByWorkDateBetween(weekStart, weekEnd);
-
-        // Group attendance per provider + booking
-        Map<String, Integer> presentCountMap = new HashMap<>();
-        Map<String, Provider> providerMap = new HashMap<>();
-        Map<String, Booking> bookingMap = new HashMap<>();
-
-        for (ProviderWorkLog log : logs) {
-
-            if (log.getStatus() != WorkStatus.AUTO_PRESENT &&
-                    log.getStatus() != WorkStatus.PRESENT) {
-                continue;
-            }
-
-            String key = log.getProvider().getId() + "-" + log.getBooking().getId();
-
-            presentCountMap.put(
-                    key,
-                    presentCountMap.getOrDefault(key, 0) + 1
-            );
-
-            providerMap.put(key, log.getProvider());
-            bookingMap.put(key, log.getBooking());
+        if (log == null || log.getStatus() == null) {
+            return;
         }
 
-        int weekNo = weekStart.get(
-                WeekFields.of(Locale.getDefault()).weekOfWeekBasedYear()
-        );
+        WorkStatus status = log.getStatus();
 
-        for (String key : presentCountMap.keySet()) {
-
-            Provider provider = providerMap.get(key);
-            Booking booking = bookingMap.get(key);
-
-            // Prevent duplicate weekly earning
-            if (earningRepository.existsByProviderAndBookingAndWeekNo(
-                    provider, booking, weekNo)) {
-                continue;
-            }
-
-            int presentDays = presentCountMap.getOrDefault(key, 0);
-
-            // Count PAID leaves in this week
-            long paidLeavesThisWeek =
-                    leaveLedgerRepository
-                            .countByProviderAndBookingAndLeaveTypeAndLeaveDateBetween(
-                                    provider,
-                                    booking,
-                                    LeaveType.PAID,
-                                    weekStart,
-                                    weekEnd
-                            );
-
-            double dailyRate = booking.getTotalPrice() / 30.0;
-
-            double totalAmount =
-                    dailyRate * (presentDays + paidLeavesThisWeek);
-
-            if (totalAmount <= 0) continue;
-
-            ProviderEarning earning = new ProviderEarning();
-            earning.setProvider(provider);
-            earning.setBooking(booking);
-            earning.setWeekNo(weekNo);
-            earning.setAmount(totalAmount);
-            earning.setStatus(EarningStatus.AVAILABLE);
-
-            earningRepository.save(earning);
+        // ✅ Only allow CONFIRMED_PRESENT or LEAVE
+        if (status != WorkStatus.CONFIRMED_PRESENT &&
+                status != WorkStatus.LEAVE) {
+            return;
         }
+
+        Provider provider = log.getProvider();
+        Booking booking = log.getBooking();
+        LocalDate workDate = log.getWorkDate();
+
+        if (provider == null || booking == null || workDate == null) {
+            return;
+        }
+
+        // 🔒 Stop service after 30 calendar days
+        LocalDate serviceStart = booking.getCreatedAt().toLocalDate();
+        LocalDate serviceEnd = serviceStart.plusDays(29);
+
+        if (workDate.isAfter(serviceEnd)) {
+            booking.setStatus(BookingStatus.COMPLETED);
+            bookingRepository.save(booking);
+            return;
+        }
+
+        // 🔒 Prevent duplicate earning for same date
+        boolean exists =
+                earningRepository.existsByProviderAndBookingAndWorkDate(
+                        provider,
+                        booking,
+                        workDate
+                );
+
+        if (exists) {
+            return;
+        }
+
+        double dailyRate = booking.getTotalPrice() / 30.0;
+        double amount = 0;
+
+        // ✅ Customer confirmed present
+        if (status == WorkStatus.CONFIRMED_PRESENT) {
+            amount = dailyRate;
+        }
+
+        // ✅ Leave (only if PAID)
+        else if (status == WorkStatus.LEAVE) {
+
+            boolean isPaidLeave =
+                    leaveLedgerRepository.existsByProviderAndBookingAndLeaveDateAndLeaveType(
+                            provider,
+                            booking,
+                            workDate,
+                            LeaveType.PAID
+                    );
+
+            if (isPaidLeave) {
+                amount = dailyRate;
+            }
+        }
+
+        if (amount <= 0) {
+            return;
+        }
+
+        ProviderEarning earning = new ProviderEarning();
+        earning.setProvider(provider);
+        earning.setBooking(booking);
+        earning.setWorkDate(workDate);
+        earning.setAmount(amount);
+        earning.setStatus(EarningStatus.AVAILABLE);
+
+        earningRepository.save(earning);
     }
 }
