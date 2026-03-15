@@ -6,6 +6,8 @@ import com.homemakers.homemakers.repository.ProviderWorkLogRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
+import static com.homemakers.homemakers.model.WorkStatus.CONFIRMED_PRESENT;
+
 @Service
 public class ProviderLeaveSettlementService {
 
@@ -32,8 +34,7 @@ public class ProviderLeaveSettlementService {
                         provider,
                         booking,
                         java.util.List.of(
-                                WorkStatus.AUTO_PRESENT,
-                                WorkStatus.PRESENT
+                                CONFIRMED_PRESENT
                         )
                 );
 
