@@ -20,8 +20,9 @@ public class UserController {
 
     // REGISTER → USER ONLY
     @PostMapping("/register")
-    public Object register(@RequestBody RegisterRequest request) {
-        return userService.registerUser(request);
+    public String register(@RequestBody RegisterRequest request) {
+        userService.registerUser(request);
+        return "User registered successfully";
     }
 
     // LOGIN
