@@ -1,11 +1,12 @@
 package com.homemakers.homemakers.service;
 
 import com.homemakers.homemakers.dto.LoginResponse;
-import com.homemakers.homemakers.dto.ProviderRegisterRequest;
 import com.homemakers.homemakers.dto.RegisterRequest;
+import com.homemakers.homemakers.model.Provider;
 import com.homemakers.homemakers.model.RefreshToken;
 import com.homemakers.homemakers.model.Role;
 import com.homemakers.homemakers.model.User;
+import com.homemakers.homemakers.repository.ProviderRepository;
 import com.homemakers.homemakers.repository.RefreshTokenRepository;
 import com.homemakers.homemakers.repository.UserRepository;
 import com.homemakers.homemakers.security.JwtUtil;
@@ -22,35 +23,62 @@ public class UserService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
-
+    private final ProviderRepository providerRepository;
     public UserService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
             PasswordEncoder passwordEncoder,
-            JwtUtil jwtUtil
+            JwtUtil jwtUtil,
+            ProviderRepository providerRepository
     ) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
+        this.providerRepository = providerRepository;
     }
 
-    // =========================
-    // ✅ PUBLIC REGISTER (USER)
-    // =========================
+    // =====================================================
+    // ✅ PUBLIC USER REGISTRATION
+    // =====================================================
     public User registerUser(RegisterRequest request) {
 
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new RuntimeException("Email already registered");
+        }
+
         User user = new User();
+
+        user.setName(request.getName());
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setRole(Role.USER);
 
-        return userRepository.save(user);
+        Role role = "PROVIDER".equalsIgnoreCase(request.getRole())
+                ? Role.PROVIDER
+                : Role.USER;
+
+        user.setRole(role);
+
+        userRepository.save(user);
+
+        if (role == Role.PROVIDER) {
+
+            Provider provider = new Provider();
+
+            provider.setUser(user);
+            provider.setVerified(false);
+            provider.setRating(0.0);
+            provider.setTotalRatings(0);
+
+            providerRepository.save(provider);
+        }
+
+        return user;
     }
 
-    // =========================
-    // ✅ LOGIN (JWT + REFRESH)
-    // =========================
+    // =====================================================
+    // ✅ LOGIN (JWT + REFRESH TOKEN)
+    // =====================================================
     public LoginResponse login(String email, String password) {
 
         User user = userRepository.findByEmail(email)
@@ -65,7 +93,7 @@ public class UserService {
                 user.getRole().name()
         );
 
-        // one refresh token per user
+        // ensure one refresh token per user
         refreshTokenRepository.findByUser(user)
                 .ifPresent(refreshTokenRepository::delete);
 
@@ -85,11 +113,9 @@ public class UserService {
         );
     }
 
-
-
-    // =========================
+    // =====================================================
     // 🔁 REFRESH ACCESS TOKEN
-    // =========================
+    // =====================================================
     public LoginResponse refreshAccessToken(String refreshTokenValue) {
 
         RefreshToken oldToken = refreshTokenRepository
@@ -104,18 +130,16 @@ public class UserService {
             throw new RuntimeException("Refresh token expired");
         }
 
-        User user = oldToken.getUser(); // ✅ get user FIRST
+        User user = oldToken.getUser();
 
-        // ❌ delete old token
+        // remove old refresh token
         refreshTokenRepository.delete(oldToken);
 
-        // 🔐 new access token
         String newAccessToken = jwtUtil.generateToken(
                 user.getEmail(),
                 user.getRole().name()
         );
 
-        // 🔁 rotate refresh token
         RefreshToken newRefreshToken = new RefreshToken();
         newRefreshToken.setToken(UUID.randomUUID().toString());
         newRefreshToken.setUser(user);
@@ -132,10 +156,9 @@ public class UserService {
         );
     }
 
-
-    // =========================
+    // =====================================================
     // 🚪 LOGOUT
-    // =========================
+    // =====================================================
     public void logout(String refreshTokenValue) {
 
         RefreshToken refreshToken = refreshTokenRepository
@@ -146,19 +169,20 @@ public class UserService {
         refreshTokenRepository.save(refreshToken);
     }
 
-    // =========================
+    // =====================================================
     // 🔐 ADMIN → CREATE PROVIDER
-    // =========================
-    public User createProvider(
-            RegisterRequest request,
-            String adminEmail
-    ) {
+    // =====================================================
+    public User createProvider(RegisterRequest request, String adminEmail) {
 
         User admin = userRepository.findByEmail(adminEmail)
                 .orElseThrow(() -> new RuntimeException("Admin not found"));
 
         if (admin.getRole() != Role.ADMIN) {
             throw new RuntimeException("Only ADMIN can create PROVIDER");
+        }
+
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new RuntimeException("Email already registered");
         }
 
         User provider = new User();
