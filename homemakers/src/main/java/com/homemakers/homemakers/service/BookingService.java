@@ -1,15 +1,13 @@
 package com.homemakers.homemakers.service;
 
-import com.homemakers.homemakers.dto.BookingPricePreviewRequest;
-import com.homemakers.homemakers.dto.BookingPricePreviewResponse;
-import com.homemakers.homemakers.dto.BookingRequest;
+import com.homemakers.homemakers.dto.*;
 import com.homemakers.homemakers.model.*;
 import com.homemakers.homemakers.repository.*;
+import com.homemakers.homemakers.util.ServiceDurationUtil;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
+import java.time.*;
 import java.util.*;
 
 @Service
@@ -21,6 +19,7 @@ public class BookingService {
     private final ProviderRepository providerRepository;
     private final ServicePricingRepository pricingRepository;
     private final ProviderLeaveLedgerRepository leaveLedgerRepository;
+    private final BookingCalculationService bookingCalculationService;
 
     public BookingService(
             BookingRepository bookingRepository,
@@ -28,7 +27,8 @@ public class BookingService {
             UserRepository userRepository,
             ProviderRepository providerRepository,
             ServicePricingRepository pricingRepository,
-            ProviderLeaveLedgerRepository leaveLedgerRepository
+            ProviderLeaveLedgerRepository leaveLedgerRepository,
+            BookingCalculationService bookingCalculationService
     ) {
         this.bookingRepository = bookingRepository;
         this.availabilityRepository = availabilityRepository;
@@ -36,19 +36,22 @@ public class BookingService {
         this.providerRepository = providerRepository;
         this.pricingRepository = pricingRepository;
         this.leaveLedgerRepository = leaveLedgerRepository;
+        this.bookingCalculationService = bookingCalculationService;
     }
 
     // =========================================================
     // CREATE BOOKING
     // =========================================================
+
     @Transactional
-    public Booking createBooking(BookingRequest request, String userEmail) {
+    public Booking createBooking(BookingPreviewRequestDTO request, String userEmail) {
 
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        ProviderAvailability slot = availabilityRepository.findById(request.getAvailabilityId())
-                .orElseThrow(() -> new RuntimeException("Slot not found"));
+        ProviderAvailability slot =
+                availabilityRepository.findWithLockById(request.getAvailabilityId())
+                        .orElseThrow(() -> new RuntimeException("Slot not found"));
 
         if (!slot.isActive()) {
             throw new RuntimeException("Slot already booked");
@@ -56,52 +59,98 @@ public class BookingService {
 
         Provider provider = slot.getProvider();
 
+        int requiredMinutes = 0;
         double totalMonthlyPrice = 0;
-        boolean hasHourlyService = false;
 
-        for (ServiceType service : request.getServices()) {
+        Set<ServiceType> services = new HashSet<>();
+
+        for (BookingServiceRequestDTO s : request.getServices()) {
+
+            ServiceType type = s.getServiceType();
+            services.add(type);
 
             ServicePricing pricing = pricingRepository
                     .findByProviderAndServiceAndCity(
                             provider,
-                            service,
+                            type,
                             provider.getCity()
                     )
                     .orElseThrow(() ->
-                            new RuntimeException("Pricing not set for " + service)
+                            new RuntimeException("Pricing not set for " + type)
                     );
 
+            Integer hours = s.getHours();
+
+            // PRICE CALCULATION
+            double price = bookingCalculationService.calculatePrice(
+                    pricing,
+                    type,
+                    request.getMembers(),
+                    request.getHouseSize(),
+                    hours
+            );
+
+            totalMonthlyPrice += price;
+
+            // TIME CALCULATION
             if (pricing.getPricingType() == PricingType.HOURLY_MONTHLY) {
-                hasHourlyService = true;
-
-                if (request.getHoursPerDay() == null || request.getHoursPerDay() <= 0) {
-                    throw new RuntimeException("Hours per day required");
-                }
-
-                totalMonthlyPrice += pricing.getPricePerHour() * request.getHoursPerDay();
+                requiredMinutes += hours * 60;
             } else {
-                totalMonthlyPrice += pricing.getMonthlyRate();
+                requiredMinutes += ServiceDurationUtil.getMinutes(type);
             }
         }
 
+        LocalTime requestStart = slot.getStartTime();
+        LocalTime requestEnd = requestStart.plusMinutes(requiredMinutes);
+
+        if (requestEnd.isAfter(slot.getEndTime())) {
+            throw new RuntimeException("Requested time outside provider slot");
+        }
+
         Booking booking = new Booking();
+
         booking.setUser(user);
         booking.setProvider(provider);
         booking.setAvailability(slot);
-        booking.setServices(new HashSet<>(request.getServices()));
+        booking.setServices(services);
         booking.setTotalPrice(totalMonthlyPrice);
-        booking.setHoursPerDay(hasHourlyService ? request.getHoursPerDay() : null);
         booking.setStatus(BookingStatus.PENDING);
+        booking.setPaymentStatus(PaymentStatus.PENDING);
+        booking.setBookingStartTime(requestStart);
+        booking.setBookingEndTime(requestEnd);
+
+        bookingRepository.save(booking);
+
+        // SLOT SPLITTING
+
+        int MIN_SLOT_MINUTES = 20;
+
+        long afterMinutes =
+                Duration.between(requestEnd, slot.getEndTime()).toMinutes();
+
+        if (afterMinutes >= MIN_SLOT_MINUTES) {
+
+            ProviderAvailability afterSlot = new ProviderAvailability();
+
+            afterSlot.setProvider(provider);
+            afterSlot.setDate(slot.getDate());
+            afterSlot.setStartTime(requestEnd);
+            afterSlot.setEndTime(slot.getEndTime());
+            afterSlot.setActive(true);
+
+            availabilityRepository.save(afterSlot);
+        }
 
         slot.setActive(false);
         availabilityRepository.save(slot);
 
-        return bookingRepository.save(booking);
+        return booking;
     }
 
     // =========================================================
-    // ACCEPT BOOKING
+    // PROVIDER ACCEPT BOOKING
     // =========================================================
+
     @Transactional
     public Booking acceptBooking(Long bookingId, String providerEmail) {
 
@@ -114,57 +163,61 @@ public class BookingService {
         }
 
         booking.setStatus(BookingStatus.CONFIRMED);
-
-        // Work starts next day
-        booking.markWorkStarted(LocalDate.now().plusDays(1));
+        booking.setPaymentStatus(PaymentStatus.PAYMENT_REQUIRED);
 
         return bookingRepository.save(booking);
     }
 
     // =========================================================
-    // PROVIDER DONE
+    // PROVIDER START WORK
     // =========================================================
+
     @Transactional
-    public Booking markServiceDone(Long bookingId, String providerEmail) {
+    public Booking startWork(Long bookingId, String providerEmail) {
 
         Booking booking = bookingRepository
                 .findByIdAndProvider_User_Email(bookingId, providerEmail)
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
 
-        if (booking.getStatus() != BookingStatus.SERVICE_IN_PROGRESS &&
-                booking.getStatus() != BookingStatus.CONFIRMED) {
-            throw new RuntimeException("Invalid booking state");
+        if (booking.getPaymentStatus() != PaymentStatus.PAID) {
+            throw new RuntimeException("Payment not completed");
         }
 
-        booking.setStatus(BookingStatus.SERVICE_DONE);
-        booking.markWorkEnded(LocalDate.now());
+        if (booking.getStatus() != BookingStatus.CONFIRMED) {
+            throw new RuntimeException("Booking not confirmed");
+        }
+
+        booking.markWorkStarted(LocalDate.now());
+        booking.setStatus(BookingStatus.SERVICE_IN_PROGRESS);
 
         return bookingRepository.save(booking);
     }
 
     // =========================================================
-    // SYSTEM COMPLETE
+    // PROVIDER END WORK
     // =========================================================
-    @Transactional
-    public Booking completeBookingBySystem(Long bookingId) {
 
-        Booking booking = bookingRepository
-                .findById(bookingId)
-                .orElseThrow(() -> new RuntimeException("Booking not found"));
-
-        if (booking.getStatus() != BookingStatus.SERVICE_DONE) {
-            throw new RuntimeException("Booking not ready");
-        }
-
-        booking.setStatus(BookingStatus.COMPLETED);
-        booking.setCompletedAt(LocalDate.now().atStartOfDay());
-
-        return bookingRepository.save(booking);
-    }
+//    @Transactional
+//    public Booking endWork(Long bookingId, String providerEmail) {
+//
+//        Booking booking = bookingRepository
+//                .findByIdAndProvider_User_Email(bookingId, providerEmail)
+//                .orElseThrow(() -> new RuntimeException("Booking not found"));
+//
+//        if (booking.getStatus() != BookingStatus.SERVICE_IN_PROGRESS) {
+//            throw new IllegalStateException("Work not in progress");
+//        }
+//
+//        booking.markWorkEnded(LocalDate.now());
+//        booking.setStatus(BookingStatus.SERVICE_DONE);
+//
+//        return bookingRepository.save(booking);
+//    }
 
     // =========================================================
-    // REJECT
+    // PROVIDER REJECT BOOKING
     // =========================================================
+
     @Transactional
     public Booking rejectBooking(Long bookingId, String providerEmail) {
 
@@ -180,74 +233,81 @@ public class BookingService {
 
         ProviderAvailability availability = booking.getAvailability();
         availability.setActive(true);
+
         availabilityRepository.save(availability);
 
         return bookingRepository.save(booking);
     }
 
     // =========================================================
-    // FETCH USER BOOKINGS
+    // ADMIN STOP SERVICE
     // =========================================================
+
+//    @Transactional
+//    public Booking stopWorkEarly(Long bookingId) {
+//
+//        Booking booking = bookingRepository.findById(bookingId)
+//                .orElseThrow(() -> new RuntimeException("Booking not found"));
+//
+//        booking.markWorkEnded(LocalDate.now());
+//        booking.setStatus(BookingStatus.SERVICE_STOPPED_BY_ADMIN);
+//
+//        return bookingRepository.save(booking);
+//    }
+
+    // =========================================================
+    // ADMIN COMPLETE BOOKING
+    // =========================================================
+
+    @Transactional
+    public Booking finalizeBooking(Long bookingId) {
+
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        booking.setStatus(BookingStatus.COMPLETED);
+        booking.setCompletedAt(LocalDateTime.now());
+
+        return bookingRepository.save(booking);
+    }
+
+    // =========================================================
+    // USER BOOKINGS
+    // =========================================================
+
     public List<Booking> getUserBookings(String email) {
         return bookingRepository.findByUser_Email(email);
     }
 
     // =========================================================
-    // FETCH PROVIDER BOOKINGS (🔥 DYNAMIC CALCULATION)
+    // PROVIDER BOOKINGS
     // =========================================================
+
     public List<Booking> getProviderBookings(String providerEmail) {
 
         Provider provider = providerRepository
                 .findByUser_Email(providerEmail)
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
-        List<Booking> bookings = bookingRepository.findByProvider(provider);
+        return bookingRepository.findByProvider(provider);
+    }
 
-        for (Booking booking : bookings) {
+    // =========================================================
+    // ADMIN ALL BOOKINGS
+    // =========================================================
 
-            if (booking.getWorkStartDate() != null) {
-
-                int totalDays = (int) ChronoUnit.DAYS.between(
-                        booking.getWorkStartDate(),
-                        LocalDate.now()
-                );
-
-                booking.setTotalDays(totalDays);
-
-                int paidLeaves =
-                        leaveLedgerRepository.countByBooking_IdAndLeaveType(
-                                booking.getId(),
-                                LeaveType.PAID
-                        );
-
-                int unpaidLeaves =
-                        leaveLedgerRepository.countByBooking_IdAndLeaveType(
-                                booking.getId(),
-                                LeaveType.UNPAID
-                        );
-
-                int allowedPaidLeaves = 3;
-
-                int extraUnpaidFromPaid =
-                        Math.max(0, paidLeaves - allowedPaidLeaves);
-
-                int finalUnpaidLeaves =
-                        unpaidLeaves + extraUnpaidFromPaid;
-
-                booking.setHolidays(Math.min(paidLeaves, allowedPaidLeaves));
-                booking.setChargeableDays(totalDays - finalUnpaidLeaves);
-            }
-        }
-
-        return bookings;
+    public List<Booking> getAllBookings() {
+        return bookingRepository.findAll();
     }
 
     // =========================================================
     // PRICE PREVIEW
     // =========================================================
+
     public BookingPricePreviewResponse previewBookingPrice(
-            BookingPricePreviewRequest request
+            BookingPreviewRequestDTO request
     ) {
+
         Provider provider = providerRepository
                 .findById(request.getProviderId())
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
@@ -255,7 +315,14 @@ public class BookingService {
         double total = 0;
         Map<String, Double> breakdown = new HashMap<>();
 
-        for (ServiceType service : request.getServices()) {
+        ProviderAvailability slot =
+                availabilityRepository.findById(request.getAvailabilityId())
+                        .orElseThrow(() -> new RuntimeException("Slot not found"));
+
+        for (BookingServiceRequestDTO s : request.getServices()) {
+
+            ServiceType service = s.getServiceType();
+            Integer hours = s.getHours();
 
             ServicePricing pricing = pricingRepository
                     .findByProviderAndServiceAndCity(
@@ -263,18 +330,47 @@ public class BookingService {
                             service,
                             provider.getCity()
                     )
-                    .orElseThrow(() ->
-                            new RuntimeException("Pricing not found")
-                    );
+                    .orElseThrow(() -> new RuntimeException("Pricing not found"));
 
-            double price = pricing.getPricingType() == PricingType.HOURLY_MONTHLY
-                    ? pricing.getPricePerHour() * request.getHoursPerDay()
-                    : pricing.getMonthlyRate();
+            if (pricing.getPricingType() == PricingType.HOURLY_MONTHLY) {
+                if (hours == null || hours <= 0) {
+                    throw new RuntimeException("Hours per day required for hourly services");
+                }
+            }
+            System.out.println("SERVICE = " + service +
+                    " HOURS = " + hours +
+                    " TYPE = " + pricing.getPricingType());
+            double price = bookingCalculationService.calculatePrice(
+                    pricing,
+                    service,
+                    request.getMembers(),
+                    request.getHouseSize(),
+                    hours
+            );
 
             breakdown.put(service.name(), price);
             total += price;
         }
+        return new BookingPricePreviewResponse(
+                total,
+                breakdown,
+                provider.getUser().getName(),
+                slot.getStartTime().toString(),
+                slot.getEndTime().toString(),
+                request.getHouseSize(),
+                request.getMembers()
+        );
+    }
+    public void autoCompleteBooking(Booking booking) {
 
-        return new BookingPricePreviewResponse(total, breakdown);
+        if (booking.getStatus() == BookingStatus.SERVICE_IN_PROGRESS) {
+
+            if (booking.getWorkStartDate() != null &&
+                    booking.getWorkStartDate().plusDays(30).isBefore(java.time.LocalDate.now())) {
+
+                booking.setStatus(BookingStatus.COMPLETED);
+                booking.setWorkEndDate(booking.getWorkStartDate().plusDays(30));
+            }
+        }
     }
 }
