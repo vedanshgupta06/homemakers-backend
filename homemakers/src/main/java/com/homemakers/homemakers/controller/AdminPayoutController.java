@@ -1,12 +1,12 @@
 package com.homemakers.homemakers.controller;
 
 import com.homemakers.homemakers.dto.AdminPayoutDTO;
-import com.homemakers.homemakers.model.ProviderPayout;
 import com.homemakers.homemakers.service.AdminPayoutService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+
 @RestController
 @RequestMapping("/api/admin/payouts")
 @PreAuthorize("hasAuthority('ROLE_ADMIN')")
@@ -19,11 +19,19 @@ public class AdminPayoutController {
     }
 
     // =========================
-    // GET ALL PAYOUTS (ADMIN)
+    // PENDING PAYOUT REQUESTS
     // =========================
-    @GetMapping
-    public List<AdminPayoutDTO> getAllPayouts() {
-        return payoutService.getAllPayoutsForAdmin();
+    @GetMapping("/requests")
+    public List<AdminPayoutDTO> getRequestedPayouts() {
+        return payoutService.getRequestedPayouts();
+    }
+
+    // =========================
+    // PAYOUT HISTORY
+    // =========================
+    @GetMapping("/history")
+    public List<AdminPayoutDTO> getPayoutHistory() {
+        return payoutService.getPayoutHistory();
     }
 
     // =========================
