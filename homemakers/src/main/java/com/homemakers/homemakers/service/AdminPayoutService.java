@@ -156,4 +156,42 @@ public class AdminPayoutService {
 
         return payout;
     }
+    public List<AdminPayoutDTO> getRequestedPayouts() {
+
+        return payoutRepository.findByStatus(PayoutStatus.INITIATED)
+                .stream()
+                .map(payout -> mapToDTO(payout))
+                .toList();
+    }
+
+    public List<AdminPayoutDTO> getPayoutHistory() {
+
+        return payoutRepository.findByStatus(PayoutStatus.PAID)
+                .stream()
+                .map(payout -> mapToDTO(payout))
+                .toList();
+    }
+    private AdminPayoutDTO mapToDTO(ProviderPayout payout) {
+
+        AdminPayoutDTO dto = new AdminPayoutDTO();
+
+        dto.setId(payout.getId());
+        dto.setAmount(payout.getAmount());
+        dto.setStatus(payout.getStatus().name());
+        dto.setWeekNo(0);
+        dto.setCreatedAt(payout.getCreatedAt());
+
+        dto.setProviderEmail(
+                payout.getProvider().getUser().getEmail()
+        );
+
+        dto.setProviderName(
+                payout.getProvider().getUser().getName()
+        );
+
+        dto.setBookingId(null);
+        dto.setServiceName("SERVICE");
+
+        return dto;
+    }
 }
