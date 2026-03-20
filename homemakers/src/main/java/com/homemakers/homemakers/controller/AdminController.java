@@ -31,8 +31,8 @@ public class AdminController {
     public List<Booking> getAllBookings() {
         return bookingRepository.findAll();
     }
-    @GetMapping("/providers")
-    public List<Provider> getAllProviders() {
-        return providerRepository.findAll();
-    }
+//    @GetMapping("/providers")
+//    public List<Provider> getAllProviders() {
+//        return providerRepository.findAll();
+//    }
 }
