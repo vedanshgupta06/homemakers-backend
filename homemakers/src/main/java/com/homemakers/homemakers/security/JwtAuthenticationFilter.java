@@ -12,7 +12,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Collections;
-
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -26,7 +26,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
         return path.startsWith("/api/auth/")
-                || path.equals("/api/users/register");
+                || path.equals("/api/users/register")
+                || path.equals("/api/payments/webhook");
     }
 
     @Override
@@ -35,7 +36,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
-
+        if (request.getMethod().equalsIgnoreCase("OPTIONS")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
         System.out.println(">>> FILTER HIT: " + request.getMethod() + " " + request.getServletPath());
 
         String authHeader = request.getHeader("Authorization");
@@ -44,7 +48,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             String token = authHeader.substring(7);
 
-            if (jwtUtil.validateToken(token)) {
+            System.out.println("TOKEN RECEIVED: " + token);
+            System.out.println("VALID TOKEN? " + jwtUtil.validateToken(token));
+            if (jwtUtil.validateToken(token)
+                    && SecurityContextHolder.getContext().getAuthentication() == null) {
 
                 String email = jwtUtil.extractEmail(token);
                 String role = jwtUtil.extractRole(token);
@@ -60,8 +67,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                 )
                         );
 
-                SecurityContextHolder.getContext()
-                        .setAuthentication(authentication);
+                authentication.setDetails(
+                        new WebAuthenticationDetailsSource().buildDetails(request)
+                );
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
             }
         }
 

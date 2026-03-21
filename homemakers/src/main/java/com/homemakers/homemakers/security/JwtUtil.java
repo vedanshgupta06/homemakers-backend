@@ -27,7 +27,7 @@ public class JwtUtil {
                 .claim("role", role)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
-                .signWith(key)
+                .signWith(key, SignatureAlgorithm.HS384)
                 .compact();
     }
 
@@ -36,6 +36,7 @@ public class JwtUtil {
             getClaims(token);
             return true;
         } catch (Exception e) {
+            System.out.println("JWT ERROR: " + e.getMessage());
             return false;
         }
     }
