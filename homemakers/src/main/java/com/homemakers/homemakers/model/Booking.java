@@ -4,8 +4,9 @@ import jakarta.persistence.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.time.LocalTime;
 import java.util.Set;
+
 @Entity
 @Table(name = "bookings",
         uniqueConstraints = @UniqueConstraint(columnNames = {"availability_id"}))
@@ -20,11 +21,13 @@ public class Booking {
     @Enumerated(EnumType.STRING)
     @Column(name = "service")
     private Set<ServiceType> services;
-
+    private Double walletUsed = 0.0;
+    private Double finalPayableAmount;
     @Column(nullable = false)
-    private double totalPrice; // monthly locked price
+    private double totalPrice;
 
-    private Integer hoursPerDay; // 🔥 REQUIRED for HOURLY_MONTHLY
+
+    private Integer hoursPerDay;
 
     @ManyToOne(optional = false)
     private User user;
@@ -39,17 +42,17 @@ public class Booking {
     @Enumerated(EnumType.STRING)
     private BookingStatus status = BookingStatus.PENDING;
 
-    private int totalDays ;
-    private int holidays ;
-    private int chargeableDays ;
+    private int totalDays;
+    private int holidays;
+    private int chargeableDays;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime completedAt;
-    private LocalDate workStartDate;   // set once
-    private LocalDate workEndDate;     // optional, system set
-    private LocalDateTime getCreatedAt;
 
+    // 🔥 Proper service period tracking
+    private LocalDate workStartDate;
+    private LocalDate workEndDate;
 
     @PrePersist
     void onCreate() {
@@ -61,114 +64,81 @@ public class Booking {
     void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+    @Enumerated(EnumType.STRING)
+    private PaymentStatus paymentStatus = PaymentStatus.PENDING;
 
-    public Long getId() {
-        return id;
+    private String stripeSessionId;
+
+    private String stripePaymentIntent;
+
+    @Column(name = "booking_start_time")
+    private LocalTime bookingStartTime;
+
+    @Column(name = "booking_end_time")
+    private LocalTime bookingEndTime;
+
+    private boolean settlementDone = false;
+
+    public boolean isSettlementDone() {
+        return settlementDone;
     }
 
-    public void setId(Long id) {
-        this.id = id;
+    public void setSettlementDone(boolean settlementDone) {
+        this.settlementDone = settlementDone;
     }
+    // ================= GETTERS & SETTERS =================
 
-    public Set<ServiceType> getServices() {
-        return services;
-    }
+    public Long getId() { return id; }
 
-    public void setServices(Set<ServiceType> services) {
-        this.services = services;
-    }
+    public Set<ServiceType> getServices() { return services; }
 
-    public double getTotalPrice() {
-        return totalPrice;
-    }
+    public void setServices(Set<ServiceType> services) { this.services = services; }
 
-    public void setTotalPrice(double totalPrice) {
-        this.totalPrice = totalPrice;
-    }
+    public double getTotalPrice() { return totalPrice; }
 
-    public Integer getHoursPerDay() {
-        return hoursPerDay;
-    }
+    public void setTotalPrice(double totalPrice) { this.totalPrice = totalPrice; }
 
-    public void setHoursPerDay(Integer hoursPerDay) {
-        this.hoursPerDay = hoursPerDay;
-    }
+    public Integer getHoursPerDay() { return hoursPerDay; }
 
-    public User getUser() {
-        return user;
-    }
+    public void setHoursPerDay(Integer hoursPerDay) { this.hoursPerDay = hoursPerDay; }
 
-    public void setUser(User user) {
-        this.user = user;
-    }
+    public User getUser() { return user; }
 
-    public Provider getProvider() {
-        return provider;
-    }
+    public void setUser(User user) { this.user = user; }
 
-    public void setProvider(Provider provider) {
-        this.provider = provider;
-    }
+    public Provider getProvider() { return provider; }
 
-    public ProviderAvailability getAvailability() {
-        return availability;
-    }
+    public void setProvider(Provider provider) { this.provider = provider; }
 
-    public void setAvailability(ProviderAvailability availability) {
-        this.availability = availability;
-    }
+    public ProviderAvailability getAvailability() { return availability; }
 
-    public BookingStatus getStatus() {
-        return status;
-    }
+    public void setAvailability(ProviderAvailability availability) { this.availability = availability; }
 
-    public void setStatus(BookingStatus status) {
-        this.status = status;
-    }
+    public BookingStatus getStatus() { return status; }
 
-    public int getTotalDays() {
-        return totalDays;
-    }
+    public void setStatus(BookingStatus status) { this.status = status; }
 
-    public void setTotalDays(int totalDays) {
-        this.totalDays = totalDays;
-    }
+    public int getTotalDays() { return totalDays; }
 
-    public int getHolidays() {
-        return holidays;
-    }
+    public void setTotalDays(int totalDays) { this.totalDays = totalDays; }
 
-    public void setHolidays(int holidays) {
-        this.holidays = holidays;
-    }
+    public int getHolidays() { return holidays; }
 
-    public int getChargeableDays() {
-        return chargeableDays;
-    }
+    public void setHolidays(int holidays) { this.holidays = holidays; }
 
-    public void setChargeableDays(int chargeableDays) {
-        this.chargeableDays = chargeableDays;
-    }
+    public int getChargeableDays() { return chargeableDays; }
 
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
+    public void setChargeableDays(int chargeableDays) { this.chargeableDays = chargeableDays; }
 
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
+    public LocalDateTime getCreatedAt() { return createdAt; }
 
-    public LocalDateTime getCompletedAt() {
-        return completedAt;
-    }
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
 
-    public void setCompletedAt(LocalDateTime completedAt) {
-        this.completedAt = completedAt;
-    }
+    public LocalDateTime getCompletedAt() { return completedAt; }
 
-    public LocalDate getWorkStartDate() {
-        return workStartDate;
-    }
+    public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
+
+    public LocalDate getWorkStartDate() { return workStartDate; }
 
     public void markWorkStarted(LocalDate date) {
         if (this.workStartDate != null) {
@@ -177,9 +147,7 @@ public class Booking {
         this.workStartDate = date;
     }
 
-    public LocalDate getWorkEndDate() {
-        return workEndDate;
-    }
+    public LocalDate getWorkEndDate() { return workEndDate; }
 
     public void markWorkEnded(LocalDate date) {
         if (this.workEndDate != null) {
@@ -188,13 +156,66 @@ public class Booking {
         this.workEndDate = date;
     }
 
-    public LocalDateTime getGetCreatedAt() {
-        return getCreatedAt;
+    public PaymentStatus getPaymentStatus() {
+        return paymentStatus;
     }
 
-    public void setGetCreatedAt(LocalDateTime getCreatedAt) {
-        this.getCreatedAt = getCreatedAt;
+    public void setPaymentStatus(PaymentStatus paymentStatus) {
+        this.paymentStatus = paymentStatus;
     }
 
-    // getters/setters
+    public String getStripeSessionId() {
+        return stripeSessionId;
+    }
+
+    public void setStripeSessionId(String stripeSessionId) {
+        this.stripeSessionId = stripeSessionId;
+    }
+
+    public String getStripePaymentIntent() {
+        return stripePaymentIntent;
+    }
+
+    public void setStripePaymentIntent(String stripePaymentIntent) {
+        this.stripePaymentIntent = stripePaymentIntent;
+    }
+
+    public LocalTime getBookingStartTime() {
+        return bookingStartTime;
+    }
+
+    public void setBookingStartTime(LocalTime bookingStartTime) {
+        this.bookingStartTime = bookingStartTime;
+    }
+
+    public LocalTime getBookingEndTime() {
+        return bookingEndTime;
+    }
+
+    public void setBookingEndTime(LocalTime bookingEndTime) {
+        this.bookingEndTime = bookingEndTime;
+    }
+    public void setWorkEndDate(java.time.LocalDate workEndDate) {
+        this.workEndDate = workEndDate;
+    }
+
+    public Double getWalletUsed() {
+        return walletUsed;
+    }
+
+    public void setWalletUsed(Double walletUsed) {
+        this.walletUsed = walletUsed;
+    }
+
+    public Double getFinalPayableAmount() {
+        return finalPayableAmount;
+    }
+
+    public void setFinalPayableAmount(Double finalPayableAmount) {
+        this.finalPayableAmount = finalPayableAmount;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
 }
