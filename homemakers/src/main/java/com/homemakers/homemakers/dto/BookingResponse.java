@@ -1,22 +1,62 @@
 package com.homemakers.homemakers.dto;
 
 import com.homemakers.homemakers.model.BookingStatus;
+import com.homemakers.homemakers.model.ServiceType;
+
+import java.util.List;
 
 public class BookingResponse {
 
     private Long bookingId;
     private BookingStatus status;
 
-    public BookingResponse(Long bookingId, BookingStatus status) {
+    private String customerName;
+    private String serviceDate;
+    private String startTime;
+    private String endTime;
+
+    private int totalDays;
+    private int chargeableDays;
+    private int holidays;
+    private List<ServiceType> services;
+    public BookingResponse(Long bookingId,
+                           BookingStatus status,
+                           String customerName,
+                           String serviceDate,
+                           List<ServiceType> services,
+                           String startTime,
+                           String endTime,
+                           int totalDays,
+                           int chargeableDays,
+                           int holidays) {
+
         this.bookingId = bookingId;
         this.status = status;
+        this.customerName = customerName;
+        this.serviceDate = serviceDate;
+        this.services = services;
+        this.startTime = startTime;
+        this.endTime = endTime;
+        this.totalDays = totalDays;
+        this.chargeableDays = chargeableDays;
+        this.holidays = holidays;
     }
 
-    public Long getBookingId() {
-        return bookingId;
+    public Long getBookingId() { return bookingId; }
+    public BookingStatus getStatus() { return status; }
+    public String getCustomerName() { return customerName; }
+    public String getServiceDate() { return serviceDate; }
+    public String getStartTime() { return startTime; }
+    public String getEndTime() { return endTime; }
+    public int getTotalDays() { return totalDays; }
+    public int getChargeableDays() { return chargeableDays; }
+    public int getHolidays() { return holidays; }
+
+    public List<ServiceType> getServices() {
+        return services;
     }
 
-    public BookingStatus getStatus() {
-        return status;
+    public void setServices(List<ServiceType> services) {
+        this.services = services;
     }
 }
