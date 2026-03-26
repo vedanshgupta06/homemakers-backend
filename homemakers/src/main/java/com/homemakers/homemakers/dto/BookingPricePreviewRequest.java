@@ -2,7 +2,7 @@ package com.homemakers.homemakers.dto;
 
 import com.homemakers.homemakers.model.ServiceType;
 import java.util.Set;
-
+//can be deleted
 public class BookingPricePreviewRequest {
 
     private Long providerId;
