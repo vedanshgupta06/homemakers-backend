@@ -4,12 +4,12 @@ import com.homemakers.homemakers.model.ServiceType;
 import java.util.Set;
 
 import java.util.List;
-
+import java.time.LocalTime;
 public class BookingRequest {
 
     private Long availabilityId;
     private List<ServiceType> services;
-
+    private LocalTime preferredStartTime;
     // Required ONLY if any service is HOURLY_MONTHLY
     private Integer hoursPerDay;
 
@@ -35,5 +35,13 @@ public class BookingRequest {
 
     public void setHoursPerDay(Integer hoursPerDay) {
         this.hoursPerDay = hoursPerDay;
+    }
+
+    public LocalTime getPreferredStartTime() {
+        return preferredStartTime;
+    }
+
+    public void setPreferredStartTime(LocalTime preferredStartTime) {
+        this.preferredStartTime = preferredStartTime;
     }
 }
