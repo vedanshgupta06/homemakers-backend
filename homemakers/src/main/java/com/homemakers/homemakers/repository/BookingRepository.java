@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.List;
@@ -53,4 +54,24 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     );
 
     List<Booking> findByStatus(BookingStatus status);
+    @Query("""
+        SELECT b FROM Booking b
+        WHERE b.availability.id = :availabilityId
+        AND b.status IN (
+            com.homemakers.homemakers.model.BookingStatus.PENDING,
+            com.homemakers.homemakers.model.BookingStatus.CONFIRMED,
+            com.homemakers.homemakers.model.BookingStatus.SERVICE_IN_PROGRESS
+        )
+        """)
+    List<Booking> findActiveBookingsByAvailability(Long availabilityId);
+
+    Optional<Booking> findByStripeSessionId(String sessionId);
+    List<Booking> findByUser_EmailAndPaymentStatus(
+            String email,
+            PaymentStatus paymentStatus
+    );
+    List<Booking> findByStatusAndCreatedAtBefore(
+            BookingStatus status,
+            LocalDateTime time
+    );
 }
