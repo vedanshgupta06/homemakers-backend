@@ -1,7 +1,10 @@
 package com.homemakers.homemakers.model;
 
 public enum PaymentStatus {
+
     PENDING,
     PAID,
-    FAILED
+    PAYMENT_REQUIRED,
+    FAILED,
+    REFUNDED
 }
