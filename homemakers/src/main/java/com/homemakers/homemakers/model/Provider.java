@@ -1,8 +1,9 @@
 package com.homemakers.homemakers.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 
@@ -14,23 +15,72 @@ public class Provider {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // =====================================
+    // LINKED USER ACCOUNT
+    // =====================================
     @OneToOne
     @JoinColumn(name = "user_id", nullable = false, unique = true)
     private User user;
 
+    // =====================================
+    // SERVICES OFFERED
+    // =====================================
     @ElementCollection
-    @CollectionTable(name = "provider_services")
+    @CollectionTable(
+            name = "provider_services",
+            joinColumns = @JoinColumn(name = "provider_id")
+    )
+    @Column(name = "service")
     private Set<String> services;
 
+    // =====================================
+    // PROFILE DETAILS
+    // =====================================
     private String city;
+
     private int experienceYears;
+
     private double pricePerHour;
 
+    // =====================================
+    // PROFILE PHOTO
+    // =====================================
+    private String profilePhotoUrl;
+
+    // =====================================
+    // DOCUMENTS FOR VERIFICATION
+    // =====================================
+    private String idProofUrl;
+
+    private String addressProofUrl;
+
+    // =====================================
+    // VERIFICATION STATUS
+    // =====================================
     private boolean verified = false;
+
+    // =====================================
+    // RATINGS
+    // =====================================
     private double rating = 0.0;
+
     private int totalRatings = 0;
 
-    // ===== REQUIRED GETTERS / SETTERS =====
+    // =====================================
+    // WALLET / PAYOUT
+    // =====================================
+    @Column(name = "last_payout_requested_at")
+    private LocalDateTime lastPayoutRequestedAt;
+
+    // =====================================
+    // AVAILABILITY
+    // =====================================
+    @OneToMany(mappedBy = "provider", cascade = CascadeType.ALL)
+    @JsonIgnore
+    private List<ProviderAvailability> availabilities;
+    // =====================================
+    // GETTERS & SETTERS
+    // =====================================
 
     public Long getId() {
         return id;
@@ -76,6 +126,30 @@ public class Provider {
         this.pricePerHour = pricePerHour;
     }
 
+    public String getProfilePhotoUrl() {
+        return profilePhotoUrl;
+    }
+
+    public void setProfilePhotoUrl(String profilePhotoUrl) {
+        this.profilePhotoUrl = profilePhotoUrl;
+    }
+
+    public String getIdProofUrl() {
+        return idProofUrl;
+    }
+
+    public void setIdProofUrl(String idProofUrl) {
+        this.idProofUrl = idProofUrl;
+    }
+
+    public String getAddressProofUrl() {
+        return addressProofUrl;
+    }
+
+    public void setAddressProofUrl(String addressProofUrl) {
+        this.addressProofUrl = addressProofUrl;
+    }
+
     public boolean isVerified() {
         return verified;
     }
@@ -99,8 +173,20 @@ public class Provider {
     public void setTotalRatings(int totalRatings) {
         this.totalRatings = totalRatings;
     }
-    @OneToMany(mappedBy = "provider", cascade = CascadeType.ALL)
-    private List<ProviderAvailability> availabilities;
 
+    public LocalDateTime getLastPayoutRequestedAt() {
+        return lastPayoutRequestedAt;
+    }
 
+    public void setLastPayoutRequestedAt(LocalDateTime lastPayoutRequestedAt) {
+        this.lastPayoutRequestedAt = lastPayoutRequestedAt;
+    }
+
+    public List<ProviderAvailability> getAvailabilities() {
+        return availabilities;
+    }
+
+    public void setAvailabilities(List<ProviderAvailability> availabilities) {
+        this.availabilities = availabilities;
+    }
 }
