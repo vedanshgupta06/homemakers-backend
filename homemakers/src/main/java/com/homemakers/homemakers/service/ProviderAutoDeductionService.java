@@ -32,11 +32,18 @@ public class ProviderAutoDeductionService {
 
         if (unpaidLeaves == 0) return;
 
+        // ✅ SAFE daily salary calculation
         double dailySalary =
-                booking.getTotalPrice() / booking.getChargeableDays();
+                booking.getChargeableDays() == 0
+                        ? 0
+                        : booking.getTotalPrice() / booking.getChargeableDays();
 
-        double deductionAmount =
-                unpaidLeaves * dailySalary;
+        double deductionAmount = unpaidLeaves * dailySalary;
+
+        // ✅ prevent NaN / invalid deduction
+        if (Double.isNaN(deductionAmount) || deductionAmount <= 0) {
+            return;
+        }
 
         ProviderDeduction deduction = new ProviderDeduction();
         deduction.setProvider(provider);
