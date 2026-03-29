@@ -1,3 +1,4 @@
+
 package com.homemakers.homemakers.service;
 
 import com.homemakers.homemakers.dto.*;
@@ -5,6 +6,7 @@ import com.homemakers.homemakers.model.*;
 import com.homemakers.homemakers.repository.*;
 import com.homemakers.homemakers.util.ServiceDurationUtil;
 import jakarta.transaction.Transactional;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.*;
@@ -20,7 +22,10 @@ public class BookingService {
     private final ServicePricingRepository pricingRepository;
     private final ProviderLeaveLedgerRepository leaveLedgerRepository;
     private final BookingCalculationService bookingCalculationService;
-
+    private final ProviderSettlementService providerSettlementService;
+    private final UserWalletService userWalletService;
+    private final PaymentService paymentService;
+    private final PaymentTransactionRepository paymentTransactionRepository;
     public BookingService(
             BookingRepository bookingRepository,
             ProviderAvailabilityRepository availabilityRepository,
@@ -28,7 +33,11 @@ public class BookingService {
             ProviderRepository providerRepository,
             ServicePricingRepository pricingRepository,
             ProviderLeaveLedgerRepository leaveLedgerRepository,
-            BookingCalculationService bookingCalculationService
+            BookingCalculationService bookingCalculationService,
+            ProviderSettlementService providerSettlementService,
+            UserWalletService userWalletService,
+            PaymentService paymentService,
+            PaymentTransactionRepository paymentTransactionRepository
     ) {
         this.bookingRepository = bookingRepository;
         this.availabilityRepository = availabilityRepository;
@@ -37,6 +46,10 @@ public class BookingService {
         this.pricingRepository = pricingRepository;
         this.leaveLedgerRepository = leaveLedgerRepository;
         this.bookingCalculationService = bookingCalculationService;
+        this.providerSettlementService = providerSettlementService;
+        this.userWalletService = userWalletService;
+        this.paymentService = paymentService;
+        this.paymentTransactionRepository = paymentTransactionRepository;
     }
 
     // =========================================================
@@ -48,7 +61,7 @@ public class BookingService {
 
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-
+        String userCity = user.getCity();
         ProviderAvailability slot =
                 availabilityRepository.findWithLockById(request.getAvailabilityId())
                         .orElseThrow(() -> new RuntimeException("Slot not found"));
@@ -108,14 +121,29 @@ public class BookingService {
         }
 
         Booking booking = new Booking();
-
+        booking.setCreatedAt(LocalDateTime.now());
         booking.setUser(user);
         booking.setProvider(provider);
         booking.setAvailability(slot);
         booking.setServices(services);
-        booking.setTotalPrice(totalMonthlyPrice);
+
+        double totalPrice = totalMonthlyPrice;
+
+        booking.setTotalPrice(totalPrice);
         booking.setStatus(BookingStatus.PENDING);
         booking.setPaymentStatus(PaymentStatus.PENDING);
+
+        bookingRepository.save(booking);
+
+// 🆕 Reserve wallet instead of deducting
+        double walletReserved = userWalletService.reserveAmount(
+                user.getId(),
+                booking.getId(),
+                totalPrice
+        );
+
+        booking.setWalletUsed(walletReserved);
+        booking.setFinalPayableAmount(totalPrice - walletReserved);
         booking.setBookingStartTime(requestStart);
         booking.setBookingEndTime(requestEnd);
 
@@ -163,7 +191,38 @@ public class BookingService {
         }
 
         booking.setStatus(BookingStatus.CONFIRMED);
-        booking.setPaymentStatus(PaymentStatus.PAYMENT_REQUIRED);
+
+        // 🆕 CONFIRM RESERVED AMOUNT (VERY IMPORTANT)
+        if (booking.getWalletUsed() != null && booking.getWalletUsed() > 0) {
+
+            userWalletService.confirmReservedAmount(
+                    booking.getUser().getId(),
+                    booking.getId(),
+                    booking.getWalletUsed()
+            );
+        }
+// 🔥 SAVE WALLET PAYMENT TRANSACTION
+        if (booking.getWalletUsed() != null && booking.getWalletUsed() > 0) {
+
+            PaymentTransaction txn = new PaymentTransaction();
+            txn.setUserId(booking.getUser().getId());
+            txn.setBookingId(booking.getId());
+            txn.setAmount(booking.getWalletUsed());
+            txn.setMethod(PaymentMethod.WALLET);
+            txn.setStatus(PaymentStatus.PAID);
+            txn.setDescription("Paid via wallet");
+
+            paymentTransactionRepository.save(txn);
+        }
+        // 🆕 SET PAYMENT STATUS CORRECTLY
+        if (booking.getFinalPayableAmount() != null &&
+                booking.getFinalPayableAmount() == 0) {
+
+            paymentService.markBookingAsPaid(booking); // ✅ FIX
+
+        } else {
+            booking.setPaymentStatus(PaymentStatus.PAYMENT_REQUIRED);
+        }
 
         return bookingRepository.save(booking);
     }
@@ -231,6 +290,16 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.CANCELLED);
 
+        // 🆕 RELEASE RESERVED MONEY
+        if (booking.getWalletUsed() != null && booking.getWalletUsed() > 0) {
+
+            userWalletService.releaseReservedAmount(
+                    booking.getUser().getId(),
+                    booking.getId(),
+                    booking.getWalletUsed()
+            );
+        }
+
         ProviderAvailability availability = booking.getAvailability();
         availability.setActive(true);
 
@@ -238,7 +307,6 @@ public class BookingService {
 
         return bookingRepository.save(booking);
     }
-
     // =========================================================
     // ADMIN STOP SERVICE
     // =========================================================
@@ -268,9 +336,36 @@ public class BookingService {
         booking.setStatus(BookingStatus.COMPLETED);
         booking.setCompletedAt(LocalDateTime.now());
 
+        // ✅ ADD THIS LINE
+        providerSettlementService.finalizeSettlement(booking);
+
         return bookingRepository.save(booking);
     }
+    @Transactional
+    public Booking terminateBooking(Long bookingId) {
 
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        if (booking.getStatus() != BookingStatus.SERVICE_IN_PROGRESS) {
+            throw new RuntimeException("Only active bookings can be terminated");
+        }
+
+        booking.setStatus(BookingStatus.TERMINATED);
+        booking.setWorkEndDate(LocalDate.now());
+        booking.setCompletedAt(LocalDateTime.now());
+
+        bookingRepository.save(booking);
+
+        // ✅ ADD THIS (MAIN FIX)
+        if (!booking.isSettlementDone()) {
+            providerSettlementService.finalizeSettlement(booking);
+            booking.setSettlementDone(true);
+            bookingRepository.save(booking);
+        }
+
+        return booking;
+    }
     // =========================================================
     // USER BOOKINGS
     // =========================================================
@@ -372,5 +467,79 @@ public class BookingService {
                 booking.setWorkEndDate(booking.getWorkStartDate().plusDays(30));
             }
         }
+    }
+    public List<ProviderOptionDTO> getProviderOptions(BookingPreviewRequestDTO request) {
+
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        String userCity = user.getCity();
+
+        List<Provider> providers = providerRepository.findByCity(userCity);
+
+        List<ProviderOptionDTO> result = new ArrayList<>();
+
+        for (Provider provider : providers) {
+
+
+            List<ProviderAvailability> slots =
+                    availabilityRepository.findByProvider(provider);
+
+            boolean hasValidSlot = slots.stream().anyMatch(slot ->
+                    slot.isActive() &&
+                            slot.getDate().isEqual(request.getStartDate())
+            );
+
+
+            if (!hasValidSlot) {
+                continue;
+            }
+
+            boolean validProvider = true;
+            double total = 0;
+            Map<String, Double> breakdown = new HashMap<>();
+
+            for (BookingServiceRequestDTO s : request.getServices()) {
+
+                ServicePricing pricing = pricingRepository
+                        .findByProviderAndServiceAndCity(
+                                provider,
+                                s.getServiceType(),
+                                userCity
+                        )
+                        .orElse(null);
+
+                if (pricing == null) {
+                    validProvider = false;
+                    break;
+                }
+
+                double price = bookingCalculationService.calculatePrice(
+                        pricing,
+                        s.getServiceType(),
+                        request.getMembers(),
+                        request.getHouseSize(),
+                        s.getHours()
+                );
+
+                breakdown.put(s.getServiceType().name(), price);
+                total += price;
+            }
+
+            if (!validProvider) continue;
+
+            result.add(new ProviderOptionDTO(
+                    provider.getId(),
+                    provider.getUser().getName(),
+                    provider.getRating(),
+                    provider.getExperienceYears(),
+                    total,
+                    breakdown,
+                    provider.getProfilePhotoUrl()
+            ));
+        }
+        return result;
     }
 }
