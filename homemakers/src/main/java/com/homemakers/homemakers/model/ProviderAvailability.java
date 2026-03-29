@@ -1,12 +1,17 @@
 package com.homemakers.homemakers.model;
 
 import jakarta.persistence.*;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
 @Entity
 @Table(
         name = "provider_availability",
+        indexes = {
+                @Index(name = "idx_provider_date", columnList = "provider_id,date"),
+                @Index(name = "idx_date_active", columnList = "date,active")
+        },
         uniqueConstraints = {
                 @UniqueConstraint(
                         columnNames = {"provider_id", "date", "start_time", "end_time"}
@@ -29,9 +34,35 @@ public class ProviderAvailability {
 
     private LocalTime endTime;
 
-    private boolean active = true;
 
-    // ===== GETTERS & SETTERS =====
+    @Column(name = "active")
+    private Boolean active;
+    // =============================
+    // VALIDATION
+    // =============================
+
+    @PrePersist
+    @PreUpdate
+    public void validateTimes() {
+
+        if(startTime.isAfter(endTime) || startTime.equals(endTime)){
+            throw new IllegalArgumentException(
+                    "Slot start time must be before end time"
+            );
+        }
+    }
+
+    // =============================
+    // HELPER
+    // =============================
+
+    public long getDurationMinutes() {
+        return Duration.between(startTime, endTime).toMinutes();
+    }
+
+    // =============================
+    // GETTERS / SETTERS
+    // =============================
 
     public Long getId() {
         return id;
