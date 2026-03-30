@@ -170,6 +170,7 @@ public List<BookingResponse> getProviderBookings(Authentication authentication) 
                 new java.util.ArrayList<>(booking.getServices()),
                 booking.getBookingStartTime() != null ? booking.getBookingStartTime().toString() : "-",
                 booking.getBookingEndTime() != null ? booking.getBookingEndTime().toString() : "Ongoing",
+                booking.getPaymentStatus().name(),
                 totalDays,
                 chargeableDays,
                 totalDays-chargeableDays
