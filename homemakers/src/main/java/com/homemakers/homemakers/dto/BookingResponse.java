@@ -15,10 +15,16 @@ public class BookingResponse {
     private String startTime;
     private String endTime;
 
+    // ✅ IMPORTANT FIELD
+    private String paymentStatus;
+
     private int totalDays;
     private int chargeableDays;
     private int holidays;
+
     private List<ServiceType> services;
+
+    // ✅ UPDATED CONSTRUCTOR (WITH paymentStatus)
     public BookingResponse(Long bookingId,
                            BookingStatus status,
                            String customerName,
@@ -26,6 +32,7 @@ public class BookingResponse {
                            List<ServiceType> services,
                            String startTime,
                            String endTime,
+                           String paymentStatus,   // 🔥 ADDED
                            int totalDays,
                            int chargeableDays,
                            int holidays) {
@@ -37,6 +44,7 @@ public class BookingResponse {
         this.services = services;
         this.startTime = startTime;
         this.endTime = endTime;
+        this.paymentStatus = paymentStatus; // 🔥 SET HERE
         this.totalDays = totalDays;
         this.chargeableDays = chargeableDays;
         this.holidays = holidays;
@@ -58,5 +66,13 @@ public class BookingResponse {
 
     public void setServices(List<ServiceType> services) {
         this.services = services;
+    }
+
+    public String getPaymentStatus() {
+        return paymentStatus;
+    }
+
+    public void setPaymentStatus(String paymentStatus) {
+        this.paymentStatus = paymentStatus;
     }
 }
