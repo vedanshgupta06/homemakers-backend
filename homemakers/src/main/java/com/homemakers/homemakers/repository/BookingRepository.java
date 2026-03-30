@@ -74,4 +74,8 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             BookingStatus status,
             LocalDateTime time
     );
+    List<Booking> findByStatusAndPaymentStatus(
+            BookingStatus status,
+            PaymentStatus paymentStatus
+    );
 }
