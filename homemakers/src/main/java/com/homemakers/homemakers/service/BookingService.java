@@ -150,28 +150,50 @@ public class BookingService {
         bookingRepository.save(booking);
 
         // SLOT SPLITTING
+// 🔥 BUFFER TIME
+        int BUFFER_MINUTES = 15;
 
-        int MIN_SLOT_MINUTES = 20;
+        LocalTime slotStart = slot.getStartTime();
+        LocalTime slotEnd = slot.getEndTime();
 
-        long afterMinutes =
-                Duration.between(requestEnd, slot.getEndTime()).toMinutes();
+// 1️⃣ CASE: booking starts at slot start
+        if (requestStart.equals(slotStart)) {
 
-        if (afterMinutes >= MIN_SLOT_MINUTES) {
+            LocalTime bufferedEnd = requestEnd.plusMinutes(BUFFER_MINUTES);
 
-            ProviderAvailability afterSlot = new ProviderAvailability();
+            if (bufferedEnd.isBefore(slotEnd)) {
 
-            afterSlot.setProvider(provider);
-            afterSlot.setDate(slot.getDate());
-            afterSlot.setStartTime(requestEnd);
-            afterSlot.setEndTime(slot.getEndTime());
-            afterSlot.setActive(true);
+                slot.setStartTime(bufferedEnd); // shift slot forward
+                availabilityRepository.save(slot);
 
-            availabilityRepository.save(afterSlot);
+            } else {
+                slot.setActive(false); // fully consumed
+                availabilityRepository.save(slot);
+            }
         }
 
-        slot.setActive(false);
-        availabilityRepository.save(slot);
+// 2️⃣ CASE: booking in middle
+        else {
 
+            // 🔹 BEFORE SLOT (available)
+            slot.setEndTime(requestStart);
+            availabilityRepository.save(slot);
+
+            // 🔹 AFTER SLOT (with buffer)
+            LocalTime bufferedEnd = requestEnd.plusMinutes(BUFFER_MINUTES);
+
+            if (bufferedEnd.isBefore(slotEnd)) {
+
+                ProviderAvailability afterSlot = new ProviderAvailability();
+                afterSlot.setProvider(provider);
+                afterSlot.setDate(slot.getDate());
+                afterSlot.setStartTime(bufferedEnd);
+                afterSlot.setEndTime(slotEnd);
+                afterSlot.setActive(true);
+
+                availabilityRepository.save(afterSlot);
+            }
+        }
         return booking;
     }
 
@@ -238,15 +260,31 @@ public class BookingService {
                 .findByIdAndProvider_User_Email(bookingId, providerEmail)
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
 
+        // ✅ Payment check
         if (booking.getPaymentStatus() != PaymentStatus.PAID) {
             throw new RuntimeException("Payment not completed");
         }
 
+        // ✅ Status check
         if (booking.getStatus() != BookingStatus.CONFIRMED) {
             throw new RuntimeException("Booking not confirmed");
         }
 
-        booking.markWorkStarted(LocalDate.now());
+        LocalDate today = LocalDate.now();
+        LocalDate startDate = booking.getAvailability().getDate();
+
+        // 🔥 PREVENT EARLY START
+        if (today.isBefore(startDate)) {
+            throw new RuntimeException("Work cannot be started before the scheduled date");
+        }
+
+        // 🔥 PREVENT LATE START
+        if (today.isAfter(startDate)) {
+            throw new RuntimeException("Start date has already passed. Contact admin.");
+        }
+
+        // ✅ Start work
+        booking.markWorkStarted(today);
         booking.setStatus(BookingStatus.SERVICE_IN_PROGRESS);
 
         return bookingRepository.save(booking);
