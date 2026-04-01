@@ -78,4 +78,10 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             BookingStatus status,
             PaymentStatus paymentStatus
     );
+    // ✅ TOTAL BOOKINGS
+    int countByUserEmail(String email);
+
+    // ✅ UPCOMING BOOKINGS
+    int countByUserEmailAndStatus(String email, BookingStatus status);
+    List<Booking> findTop5ByUserOrderByCreatedAtDesc(User user);
 }
