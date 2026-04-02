@@ -51,7 +51,7 @@ public class ProviderAvailabilityService {
         availability.setDate(request.getDate());
         availability.setStartTime(request.getStartTime());
         availability.setEndTime(request.getEndTime());
-
+        availability.setActive(true);
         availabilityRepo.save(availability);
     }
     public List<ProviderAvailability> getAvailabilityForProvider(Long providerId) {
