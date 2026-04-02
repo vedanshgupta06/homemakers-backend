@@ -3,15 +3,13 @@ package com.homemakers.homemakers.model;
 import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 
 @Entity
 @Table(
-        name = "provider_earnings",
-        uniqueConstraints = @UniqueConstraint(
-                columnNames = {"provider_id", "booking_id", "week_no"}
-        )
+        name = "provider_earnings"
 )
 
 public class ProviderEarning {
@@ -46,7 +44,7 @@ public class ProviderEarning {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payout_id")
     private ProviderPayout payout;
-
+    private LocalDate workDate;
 
     // ========================
     // LIFECYCLE
@@ -130,5 +128,13 @@ public class ProviderEarning {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public LocalDate getWorkDate() {
+        return workDate;
+    }
+
+    public void setWorkDate(LocalDate workDate) {
+        this.workDate = workDate;
     }
 }
