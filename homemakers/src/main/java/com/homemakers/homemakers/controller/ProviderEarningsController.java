@@ -79,4 +79,48 @@ public class ProviderEarningsController {
 
         return res;
     }
+    @GetMapping("/stats")
+    public Map<String, Double> stats() {
+
+        String email = SecurityContextHolder
+                .getContext()
+                .getAuthentication()
+                .getName();
+
+        Provider provider = providerRepository
+                .findByUser_Email(email)
+                .orElseThrow(() -> new RuntimeException("Provider not found"));
+
+        List<ProviderEarning> earnings = earningRepository.findByProvider(provider);
+
+        double today = 0;
+        double week = 0;
+        double month = 0;
+
+        java.time.LocalDate todayDate = java.time.LocalDate.now();
+
+        for (ProviderEarning e : earnings) {
+
+            java.time.LocalDate d = e.getWorkDate();
+
+            if (d.equals(todayDate)) {
+                today += e.getAmount();
+            }
+
+            if (!d.isBefore(todayDate.minusDays(7))) {
+                week += e.getAmount();
+            }
+
+            if (d.getMonth() == todayDate.getMonth()) {
+                month += e.getAmount();
+            }
+        }
+
+        Map<String, Double> res = new HashMap<>();
+        res.put("today", today);
+        res.put("week", week);
+        res.put("month", month);
+
+        return res;
+    }
 }
