@@ -5,10 +5,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(
-        name = "provider_payouts",
-        uniqueConstraints = {
-                @UniqueConstraint(columnNames = {"provider_id", "payout_month","status"})
-        }
+        name = "provider_payouts"
 )
 public class ProviderPayout {
 
