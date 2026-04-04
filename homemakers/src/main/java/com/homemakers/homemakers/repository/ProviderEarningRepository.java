@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 public interface ProviderEarningRepository
         extends JpaRepository<ProviderEarning, Long> {
@@ -19,14 +20,14 @@ public interface ProviderEarningRepository
     );
 
     @Query("""
-        SELECT COALESCE(SUM(e.amount), 0)
-        FROM ProviderEarning e
-        WHERE e.provider = :provider
-          AND e.status = :status
-    """)
-    Double sumByProviderAndStatus(
-            Provider provider,
-            EarningStatus status
+    SELECT COALESCE(SUM(e.amount), 0)
+    FROM ProviderEarning e
+    WHERE e.provider.id = :providerId
+      AND e.status = :status
+""")
+    Double sumByProviderIdAndStatus(
+            @Param("providerId") Long providerId,
+            @Param("status") EarningStatus status
     );
     @Query("""
 SELECT COALESCE(SUM(e.amount), 0)
@@ -75,5 +76,14 @@ WHERE e.provider = :provider
     AND e.status = com.homemakers.homemakers.model.EarningStatus.AVAILABLE
 """)
     List<ProviderEarning> findAvailableForUpdate(@Param("provider") Provider provider);
-
+    boolean existsByProviderAndBookingAndWorkDate(
+            Provider provider,
+            Booking booking,
+            LocalDate workDate
+    );
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT e FROM ProviderEarning e WHERE e.payout = :payout")
+    List<ProviderEarning> findByPayoutForUpdate(@Param("payout") ProviderPayout payout);
+    long countByProviderAndBooking(Provider provider, Booking booking);
+    boolean existsByBooking_Id(Long bookingId);
 }
