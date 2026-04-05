@@ -29,5 +29,8 @@ public interface ProviderRepository extends JpaRepository<Provider, Long> {
     Optional<Provider> findByUserId(Long userId);
 
 
+    Optional<Provider> findByUserEmail(String email);
 
+    List<Provider> findByVerifiedFalse();
+    List<Provider> findByCity(String city);
 }
