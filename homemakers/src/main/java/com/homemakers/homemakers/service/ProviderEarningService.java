@@ -50,8 +50,9 @@ public class ProviderEarningService {
         }
 
         // 🔒 Stop service after 30 calendar days
-        LocalDate serviceStart = booking.getCreatedAt().toLocalDate();
-        LocalDate serviceEnd = serviceStart.plusDays(29);
+//        LocalDate serviceStart = booking.getCreatedAt().toLocalDate();
+          LocalDate serviceStart = booking.getAvailability().getDate();
+          LocalDate serviceEnd = serviceStart.plusDays(29);
 
         if (workDate.isAfter(serviceEnd)) {
             booking.setStatus(BookingStatus.COMPLETED);
@@ -107,5 +108,24 @@ public class ProviderEarningService {
         earning.setStatus(EarningStatus.AVAILABLE);
 
         earningRepository.save(earning);
+    }
+    public void addBonusEarning(Provider provider,
+                                Booking booking,
+                                double amount,
+                                LocalDate date) {
+
+        if (amount <= 0) return;
+
+        ProviderEarning earning = new ProviderEarning();
+        earning.setProvider(provider);
+        earning.setBooking(booking);
+        earning.setWorkDate(date);
+        earning.setAmount(amount);
+        earning.setStatus(EarningStatus.AVAILABLE);
+
+        earningRepository.save(earning);
+    }
+    public boolean existsBonusForBooking(Long bookingId) {
+        return earningRepository.existsByBooking_Id(bookingId);
     }
 }
