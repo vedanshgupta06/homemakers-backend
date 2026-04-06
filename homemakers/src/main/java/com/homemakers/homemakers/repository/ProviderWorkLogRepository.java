@@ -40,5 +40,9 @@ public interface ProviderWorkLogRepository
             Booking booking,
             java.util.List<WorkStatus> statuses
     );
+    List<ProviderWorkLog> findByProviderAndWorkDate(Provider provider, LocalDate workDate);
+    List<ProviderWorkLog> findByBookingUserAndWorkDate(User user, LocalDate workDate);
+    List<ProviderWorkLog> findByBookingId(Long bookingId);
+
 
 }
