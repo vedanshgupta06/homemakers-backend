@@ -4,6 +4,9 @@ import com.homemakers.homemakers.dto.SettlementPreview;
 import com.homemakers.homemakers.model.*;
 import com.homemakers.homemakers.repository.*;
 import org.springframework.stereotype.Service;
+
+import static com.homemakers.homemakers.model.WorkStatus.CONFIRMED_PRESENT;
+
 @Service
 public class ProviderSettlementPreviewService {
 
@@ -28,8 +31,7 @@ public class ProviderSettlementPreviewService {
                         provider,
                         booking,
                         java.util.List.of(
-                                WorkStatus.AUTO_PRESENT,
-                                WorkStatus.PRESENT
+                                CONFIRMED_PRESENT
                         )
                 );
 
