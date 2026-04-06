@@ -49,6 +49,8 @@ public interface ProviderPayoutRepository
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM ProviderPayout p WHERE p.id = :id")
     Optional<ProviderPayout> findByIdForUpdate(@Param("id") Long id);
+
+    List<ProviderPayout> findByStatus(PayoutStatus status);
 }
 
 
