@@ -7,6 +7,13 @@ import com.homemakers.homemakers.service.UserService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import com.homemakers.homemakers.dto.UserProfileDto;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/users")
@@ -44,6 +51,34 @@ public class UserController {
         return "USER ACCESS 👤";
     }
 
+    // ================================
+// 👤 GET PROFILE
+// ================================
+    @GetMapping("/profile")
+    public ResponseEntity<UserProfileDto> getProfile(Authentication authentication) {
+
+        String email = authentication.getName();
+
+        return ResponseEntity.ok(userService.getProfile(email));
+    }
+
+
+    // ================================
+// ✏️ UPDATE PROFILE
+// ================================
+    @PutMapping("/profile")
+    public ResponseEntity<UserProfileDto> updateProfile(
+            Authentication authentication,
+            @RequestBody UserProfileDto dto
+    ) {
+
+        String email = authentication.getName();
+
+        return ResponseEntity.ok(userService.updateProfile(email, dto));
+    }
+
+
+
     // ROLE: PROVIDER (will move later)
     @GetMapping("/provider")
     @PreAuthorize("hasRole('PROVIDER')")
@@ -65,5 +100,26 @@ public class UserController {
                 .getContext()
                 .getAuthentication()
                 .getName();
+    }
+    @GetMapping("/dashboard-stats")
+    public ResponseEntity<Map<String, Object>> getDashboardStats(Authentication authentication) {
+
+        String email = authentication.getName();
+
+        int totalBookings = userService.getTotalBookings(email);
+        int upcoming = userService.getUpcomingBookings(email);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("totalBookings", totalBookings);
+        response.put("upcoming", upcoming);
+
+        return ResponseEntity.ok(response);
+    }
+    @GetMapping("/recent-activity")
+    public ResponseEntity<List<Map<String, Object>>> getRecentActivity(Authentication auth) {
+
+        String email = auth.getName();
+
+        return ResponseEntity.ok(userService.getRecentActivity(email));
     }
 }
