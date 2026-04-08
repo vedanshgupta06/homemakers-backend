@@ -8,9 +8,7 @@ import java.time.LocalDateTime;
 
 
 @Entity
-@Table(
-        name = "provider_earnings"
-)
+@Table(name = "provider_earnings")
 
 public class ProviderEarning {
 
