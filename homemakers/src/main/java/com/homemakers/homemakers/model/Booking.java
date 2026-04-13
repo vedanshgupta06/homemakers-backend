@@ -8,8 +8,7 @@ import java.time.LocalTime;
 import java.util.Set;
 
 @Entity
-@Table(name = "bookings",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"availability_id"}))
+@Table(name = "bookings")
 public class Booking {
 
     @Id
@@ -78,7 +77,15 @@ public class Booking {
     private LocalTime bookingEndTime;
 
     private boolean settlementDone = false;
+    // Add this field
+    @Column(nullable = true)
+    private Double penaltyApplied;
 
+    // Add getter and setter
+    public Double getPenaltyApplied() { return penaltyApplied; }
+    public void setPenaltyApplied(Double penaltyApplied) {
+        this.penaltyApplied = penaltyApplied;
+    }
     public boolean isSettlementDone() {
         return settlementDone;
     }
