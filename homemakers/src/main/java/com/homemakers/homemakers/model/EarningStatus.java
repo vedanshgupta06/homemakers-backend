@@ -9,5 +9,6 @@ public enum EarningStatus {
     REQUESTED,
 
     // Admin processed and transferred
-    PAID
+    PAID,
+    PENALTY
 }
