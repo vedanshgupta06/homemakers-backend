@@ -646,8 +646,6 @@ public class BookingService {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        String userCity = user.getCity();
-
         ProviderAvailability slot =
                 availabilityRepository.findWithLockById(request.getAvailabilityId())
                         .orElseThrow(() -> new RuntimeException("Slot not found"));
@@ -656,7 +654,7 @@ public class BookingService {
             throw new RuntimeException("Slot already booked");
         }
 
-        // ✅ FIXED: Guard against duplicate booking on same slot
+        // ✅ Guard against duplicate booking on same slot
         if (bookingRepository.existsByAvailability(slot)) {
             throw new RuntimeException("This slot is already booked");
         }
@@ -702,12 +700,76 @@ public class BookingService {
             throw new RuntimeException("Requested time outside provider slot");
         }
 
-        // ✅ FIXED: Set ALL fields before the first (and only) save
+        // =========================================================
+        // ✅ SLOT SPLITTING WITH NEW IDs
+        //
+        // OLD APPROACH (buggy):
+        //   - Mutate original slot id=30 → shifts its time → conflict
+        //
+        // NEW APPROACH (clean):
+        //   - ALWAYS deactivate original slot (id=30) → locked forever
+        //   - Create NEW slot for booked portion  → gets fresh id (e.g. 31)
+        //   - Create NEW slot for before portion  → gets fresh id (e.g. 32)
+        //   - Create NEW slot for after portion   → gets fresh id (e.g. 33)
+        //   - Booking points to id=31 (its own clean record)
+        //   - Users can book id=32 or id=33 independently
+        // =========================================================
+
+        int BUFFER_MINUTES = 15;
+
+        LocalTime originalSlotStart = slot.getStartTime();
+        LocalTime originalSlotEnd   = slot.getEndTime();
+
+        // STEP 1: Lock the original slot permanently
+        slot.setActive(false);
+        availabilityRepository.save(slot);
+
+        // STEP 2: Create a fresh slot for the booked time window
+        //         active=false because it is being consumed by this booking
+        ProviderAvailability bookedSlot = new ProviderAvailability();
+        bookedSlot.setProvider(provider);
+        bookedSlot.setDate(slot.getDate());
+        bookedSlot.setStartTime(requestStart);
+        bookedSlot.setEndTime(requestEnd);
+        bookedSlot.setActive(false); // consumed by this booking
+        ProviderAvailability savedBookedSlot = availabilityRepository.save(bookedSlot);
+        // savedBookedSlot now has its own brand-new ID
+
+        // STEP 3: Create BEFORE remainder slot (if booking doesn't start at slot start)
+        //         Example: slot 10:00–13:00, booking 11:00–12:00 → before = 10:00–11:00
+        if (requestStart.isAfter(originalSlotStart)) {
+            ProviderAvailability beforeSlot = new ProviderAvailability();
+            beforeSlot.setProvider(provider);
+            beforeSlot.setDate(slot.getDate());
+            beforeSlot.setStartTime(originalSlotStart);
+            beforeSlot.setEndTime(requestStart);
+            beforeSlot.setActive(true); // open for other users
+            availabilityRepository.save(beforeSlot);
+        }
+
+        // STEP 4: Create AFTER remainder slot with buffer (if time remains after booking + buffer)
+        //         Example: booking ends 12:00, buffer 15 min → after = 12:15–13:00
+        LocalTime bufferedEnd = requestEnd.plusMinutes(BUFFER_MINUTES);
+        if (bufferedEnd.isBefore(originalSlotEnd)) {
+            ProviderAvailability afterSlot = new ProviderAvailability();
+            afterSlot.setProvider(provider);
+            afterSlot.setDate(slot.getDate());
+            afterSlot.setStartTime(bufferedEnd);
+            afterSlot.setEndTime(originalSlotEnd);
+            afterSlot.setActive(true); // open for other users
+            availabilityRepository.save(afterSlot);
+        }
+
+        // =========================================================
+        // STEP 5: Create booking pointing to the NEW booked slot
+        //         (savedBookedSlot has a brand-new unique ID)
+        // =========================================================
+
         Booking booking = new Booking();
         booking.setCreatedAt(LocalDateTime.now());
         booking.setUser(user);
         booking.setProvider(provider);
-        booking.setAvailability(slot);
+        booking.setAvailability(savedBookedSlot); // ✅ Fresh slot — no conflict possible
         booking.setServices(services);
         booking.setTotalPrice(totalMonthlyPrice);
         booking.setStatus(BookingStatus.PENDING);
@@ -715,10 +777,10 @@ public class BookingService {
         booking.setBookingStartTime(requestStart);
         booking.setBookingEndTime(requestEnd);
 
-        // ✅ FIXED: Save ONCE so booking.getId() is populated
+        // Save once to generate booking ID
         Booking savedBooking = bookingRepository.save(booking);
 
-        // ✅ FIXED: Now booking.getId() is valid — safe to pass to wallet service
+        // Now booking ID is available — safe to call wallet service
         double walletReserved = userWalletService.reserveAmount(
                 user.getId(),
                 savedBooking.getId(),
@@ -728,51 +790,8 @@ public class BookingService {
         savedBooking.setWalletUsed(walletReserved);
         savedBooking.setFinalPayableAmount(totalMonthlyPrice - walletReserved);
 
-        // ✅ FIXED: Second save only to update wallet fields
-        bookingRepository.save(savedBooking);
-
-        // =========================================================
-        // SLOT SPLITTING WITH BUFFER
-        // =========================================================
-
-        int BUFFER_MINUTES = 15;
-
-        LocalTime slotStart = slot.getStartTime();
-        LocalTime slotEnd = slot.getEndTime();
-
-        // CASE 1: Booking starts at slot start
-        if (requestStart.equals(slotStart)) {
-
-            LocalTime bufferedEnd = requestEnd.plusMinutes(BUFFER_MINUTES);
-
-            if (bufferedEnd.isBefore(slotEnd)) {
-                slot.setStartTime(bufferedEnd); // shift slot forward
-                availabilityRepository.save(slot);
-            } else {
-                slot.setActive(false); // fully consumed
-                availabilityRepository.save(slot);
-            }
-
-            // CASE 2: Booking in middle of slot
-        } else {
-
-            slot.setEndTime(requestStart); // trim before slot
-            availabilityRepository.save(slot);
-
-            LocalTime bufferedEnd = requestEnd.plusMinutes(BUFFER_MINUTES);
-
-            if (bufferedEnd.isBefore(slotEnd)) {
-                ProviderAvailability afterSlot = new ProviderAvailability();
-                afterSlot.setProvider(provider);
-                afterSlot.setDate(slot.getDate());
-                afterSlot.setStartTime(bufferedEnd);
-                afterSlot.setEndTime(slotEnd);
-                afterSlot.setActive(true);
-                availabilityRepository.save(afterSlot);
-            }
-        }
-
-        return savedBooking;
+        // Second save only to persist wallet fields
+        return bookingRepository.save(savedBooking);
     }
 
     // =========================================================
@@ -882,9 +901,10 @@ public class BookingService {
             );
         }
 
-        ProviderAvailability availability = booking.getAvailability();
-        availability.setActive(true);
-        availabilityRepository.save(availability);
+        // ✅ Re-activate the booked slot so the time window opens back up
+        ProviderAvailability bookedSlot = booking.getAvailability();
+        bookedSlot.setActive(true);
+        availabilityRepository.save(bookedSlot);
 
         return bookingRepository.save(booking);
     }
@@ -1069,12 +1089,15 @@ public class BookingService {
                     break;
                 }
 
+                Integer hours = s.getHours();
+                if (hours == null || hours <= 0) hours = 1;
+
                 double price = bookingCalculationService.calculatePrice(
                         pricing,
                         s.getServiceType(),
                         request.getMembers(),
                         request.getHouseSize(),
-                        s.getHours()
+                        hours
                 );
 
                 breakdown.put(s.getServiceType().name(), price);
