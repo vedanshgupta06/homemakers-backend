@@ -1,5 +1,6 @@
 package com.homemakers.homemakers.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 
 import java.time.LocalDate;
@@ -27,11 +28,13 @@ public class Booking {
 
 
     private Integer hoursPerDay;
+    @ManyToOne
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 
-    @ManyToOne(optional = false)
     private User user;
 
-    @ManyToOne(optional = false)
+    @ManyToOne
+    @JsonIgnoreProperties({"availabilities", "hibernateLazyInitializer", "handler"})
     private Provider provider;
 
     @OneToOne(optional = false)
