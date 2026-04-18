@@ -3,6 +3,7 @@ package com.homemakers.homemakers.controller;
 import com.homemakers.homemakers.dto.*;
 import com.homemakers.homemakers.model.*;
 import com.homemakers.homemakers.repository.BookingRepository;
+import com.homemakers.homemakers.repository.ReviewRepository;
 import com.homemakers.homemakers.service.BookingService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -18,15 +19,16 @@ public class BookingController {
 
     private final BookingService bookingService;
     private final BookingRepository bookingRepository;
-
+    private final ReviewRepository reviewRepository;
     private final ProviderWorkLogRepository workLogRepository;
 
     public BookingController(BookingService bookingService,
-                             BookingRepository bookingRepository,ProviderWorkLogRepository workLogRepository) {
+                             BookingRepository bookingRepository,ProviderWorkLogRepository workLogRepository,
+                             ReviewRepository reviewRepository) {
 
         this.bookingService = bookingService;
         this.bookingRepository = bookingRepository;
-
+        this.reviewRepository = reviewRepository;
         this.workLogRepository = workLogRepository;
     }
 /* ======================================================
@@ -170,7 +172,9 @@ public List<BookingResponse> getProviderBookings(Authentication authentication) 
                 new java.util.ArrayList<>(booking.getServices()),
                 booking.getBookingStartTime() != null ? booking.getBookingStartTime().toString() : "-",
                 booking.getBookingEndTime() != null ? booking.getBookingEndTime().toString() : "Ongoing",
-                booking.getPaymentStatus().name(),
+                booking.getPaymentStatus() != null
+                        ? booking.getPaymentStatus().name()
+                        : "PENDING",
                 totalDays,
                 chargeableDays,
                 totalDays-chargeableDays
@@ -228,4 +232,39 @@ public List<BookingResponse> getProviderBookings(Authentication authentication) 
     ) {
         return bookingService.getProviderOptions(request);
     }
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('USER','PROVIDER','ADMIN')")
+    public BookingDetailResponse getBookingById(
+            @PathVariable Long id,
+            Authentication authentication
+    ) {
+        Booking booking = bookingRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        List<ProviderWorkLog> logs = workLogRepository.findByBookingId(id);
+
+        int totalDays = 0, chargeableDays = 0, absent = 0, leave = 0;
+
+        for (ProviderWorkLog log : logs) {
+            if (log.getStatus() == WorkStatus.REJECTED) continue;
+            totalDays++;
+            switch (log.getStatus()) {
+                case PRESENT, CONFIRMED_PRESENT -> chargeableDays++;
+                case ABSENT                     -> absent++;
+                case LEAVE                      -> leave++;
+            }
+        }
+        boolean rated = reviewRepository.existsByBooking_Id(booking.getId());
+        return new BookingDetailResponse(booking, totalDays, chargeableDays, absent, leave,rated);
+    }
+
+    /* ======================================================
+       USER – GET WORK LOGS FOR A BOOKING
+       ====================================================== */
+    @GetMapping("/{id}/work-logs")
+    @PreAuthorize("hasAnyRole('USER','PROVIDER','ADMIN')")
+    public List<ProviderWorkLog> getWorkLogs(@PathVariable Long id) {
+        return workLogRepository.findByBookingId(id);
+    }
+
 }
