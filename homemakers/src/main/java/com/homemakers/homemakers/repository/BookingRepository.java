@@ -84,4 +84,5 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     // ✅ UPCOMING BOOKINGS
     int countByUserEmailAndStatus(String email, BookingStatus status);
     List<Booking> findTop5ByUserOrderByCreatedAtDesc(User user);
+
 }
