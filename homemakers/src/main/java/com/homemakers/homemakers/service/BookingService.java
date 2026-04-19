@@ -581,12 +581,12 @@
 //        return result;
 //    }
 //}
-
 package com.homemakers.homemakers.service;
 
 import com.homemakers.homemakers.dto.*;
 import com.homemakers.homemakers.model.*;
 import com.homemakers.homemakers.repository.*;
+import com.homemakers.homemakers.util.GeoUtil;
 import com.homemakers.homemakers.util.ServiceDurationUtil;
 import jakarta.transaction.Transactional;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -654,7 +654,6 @@ public class BookingService {
             throw new RuntimeException("Slot already booked");
         }
 
-        // ✅ Guard against duplicate booking on same slot
         if (bookingRepository.existsByAvailability(slot)) {
             throw new RuntimeException("This slot is already booked");
         }
@@ -677,11 +676,7 @@ public class BookingService {
             Integer hours = s.getHours();
 
             double price = bookingCalculationService.calculatePrice(
-                    pricing,
-                    type,
-                    request.getMembers(),
-                    request.getHouseSize(),
-                    hours
+                    pricing, type, request.getMembers(), request.getHouseSize(), hours
             );
 
             totalMonthlyPrice += price;
@@ -694,61 +689,38 @@ public class BookingService {
         }
 
         LocalTime requestStart = slot.getStartTime();
-        LocalTime requestEnd = requestStart.plusMinutes(requiredMinutes);
+        LocalTime requestEnd   = requestStart.plusMinutes(requiredMinutes);
 
         if (requestEnd.isAfter(slot.getEndTime())) {
             throw new RuntimeException("Requested time outside provider slot");
         }
-
-        // =========================================================
-        // ✅ SLOT SPLITTING WITH NEW IDs
-        //
-        // OLD APPROACH (buggy):
-        //   - Mutate original slot id=30 → shifts its time → conflict
-        //
-        // NEW APPROACH (clean):
-        //   - ALWAYS deactivate original slot (id=30) → locked forever
-        //   - Create NEW slot for booked portion  → gets fresh id (e.g. 31)
-        //   - Create NEW slot for before portion  → gets fresh id (e.g. 32)
-        //   - Create NEW slot for after portion   → gets fresh id (e.g. 33)
-        //   - Booking points to id=31 (its own clean record)
-        //   - Users can book id=32 or id=33 independently
-        // =========================================================
 
         int BUFFER_MINUTES = 15;
 
         LocalTime originalSlotStart = slot.getStartTime();
         LocalTime originalSlotEnd   = slot.getEndTime();
 
-        // STEP 1: Lock the original slot permanently
         slot.setActive(false);
         availabilityRepository.save(slot);
 
-        // STEP 2: Create a fresh slot for the booked time window
-        //         active=false because it is being consumed by this booking
         ProviderAvailability bookedSlot = new ProviderAvailability();
         bookedSlot.setProvider(provider);
         bookedSlot.setDate(slot.getDate());
         bookedSlot.setStartTime(requestStart);
         bookedSlot.setEndTime(requestEnd);
-        bookedSlot.setActive(false); // consumed by this booking
+        bookedSlot.setActive(false);
         ProviderAvailability savedBookedSlot = availabilityRepository.save(bookedSlot);
-        // savedBookedSlot now has its own brand-new ID
 
-        // STEP 3: Create BEFORE remainder slot (if booking doesn't start at slot start)
-        //         Example: slot 10:00–13:00, booking 11:00–12:00 → before = 10:00–11:00
         if (requestStart.isAfter(originalSlotStart)) {
             ProviderAvailability beforeSlot = new ProviderAvailability();
             beforeSlot.setProvider(provider);
             beforeSlot.setDate(slot.getDate());
             beforeSlot.setStartTime(originalSlotStart);
             beforeSlot.setEndTime(requestStart);
-            beforeSlot.setActive(true); // open for other users
+            beforeSlot.setActive(true);
             availabilityRepository.save(beforeSlot);
         }
 
-        // STEP 4: Create AFTER remainder slot with buffer (if time remains after booking + buffer)
-        //         Example: booking ends 12:00, buffer 15 min → after = 12:15–13:00
         LocalTime bufferedEnd = requestEnd.plusMinutes(BUFFER_MINUTES);
         if (bufferedEnd.isBefore(originalSlotEnd)) {
             ProviderAvailability afterSlot = new ProviderAvailability();
@@ -756,20 +728,15 @@ public class BookingService {
             afterSlot.setDate(slot.getDate());
             afterSlot.setStartTime(bufferedEnd);
             afterSlot.setEndTime(originalSlotEnd);
-            afterSlot.setActive(true); // open for other users
+            afterSlot.setActive(true);
             availabilityRepository.save(afterSlot);
         }
-
-        // =========================================================
-        // STEP 5: Create booking pointing to the NEW booked slot
-        //         (savedBookedSlot has a brand-new unique ID)
-        // =========================================================
 
         Booking booking = new Booking();
         booking.setCreatedAt(LocalDateTime.now());
         booking.setUser(user);
         booking.setProvider(provider);
-        booking.setAvailability(savedBookedSlot); // ✅ Fresh slot — no conflict possible
+        booking.setAvailability(savedBookedSlot);
         booking.setServices(services);
         booking.setTotalPrice(totalMonthlyPrice);
         booking.setStatus(BookingStatus.PENDING);
@@ -777,20 +744,15 @@ public class BookingService {
         booking.setBookingStartTime(requestStart);
         booking.setBookingEndTime(requestEnd);
 
-        // Save once to generate booking ID
         Booking savedBooking = bookingRepository.save(booking);
 
-        // Now booking ID is available — safe to call wallet service
         double walletReserved = userWalletService.reserveAmount(
-                user.getId(),
-                savedBooking.getId(),
-                totalMonthlyPrice
+                user.getId(), savedBooking.getId(), totalMonthlyPrice
         );
 
         savedBooking.setWalletUsed(walletReserved);
         savedBooking.setFinalPayableAmount(totalMonthlyPrice - walletReserved);
 
-        // Second save only to persist wallet fields
         return bookingRepository.save(savedBooking);
     }
 
@@ -813,9 +775,7 @@ public class BookingService {
 
         if (booking.getWalletUsed() != null && booking.getWalletUsed() > 0) {
             userWalletService.confirmReservedAmount(
-                    booking.getUser().getId(),
-                    booking.getId(),
-                    booking.getWalletUsed()
+                    booking.getUser().getId(), booking.getId(), booking.getWalletUsed()
             );
         }
 
@@ -859,13 +819,12 @@ public class BookingService {
             throw new RuntimeException("Booking not confirmed");
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate today     = LocalDate.now();
         LocalDate startDate = booking.getAvailability().getDate();
 
         if (today.isBefore(startDate)) {
             throw new RuntimeException("Work cannot be started before the scheduled date");
         }
-
         if (today.isAfter(startDate)) {
             throw new RuntimeException("Start date has already passed. Contact admin.");
         }
@@ -895,13 +854,10 @@ public class BookingService {
 
         if (booking.getWalletUsed() != null && booking.getWalletUsed() > 0) {
             userWalletService.releaseReservedAmount(
-                    booking.getUser().getId(),
-                    booking.getId(),
-                    booking.getWalletUsed()
+                    booking.getUser().getId(), booking.getId(), booking.getWalletUsed()
             );
         }
 
-        // ✅ Re-activate the booked slot so the time window opens back up
         ProviderAvailability bookedSlot = booking.getAvailability();
         bookedSlot.setActive(true);
         availabilityRepository.save(bookedSlot);
@@ -921,7 +877,6 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.COMPLETED);
         booking.setCompletedAt(LocalDateTime.now());
-
         providerSettlementService.finalizeSettlement(booking);
 
         return bookingRepository.save(booking);
@@ -940,7 +895,6 @@ public class BookingService {
         booking.setStatus(BookingStatus.TERMINATED);
         booking.setWorkEndDate(LocalDate.now());
         booking.setCompletedAt(LocalDateTime.now());
-
         bookingRepository.save(booking);
 
         if (!booking.isSettlementDone()) {
@@ -1013,16 +967,8 @@ public class BookingService {
                 }
             }
 
-            System.out.println("SERVICE = " + service +
-                    " HOURS = " + hours +
-                    " TYPE = " + pricing.getPricingType());
-
             double price = bookingCalculationService.calculatePrice(
-                    pricing,
-                    service,
-                    request.getMembers(),
-                    request.getHouseSize(),
-                    hours
+                    pricing, service, request.getMembers(), request.getHouseSize(), hours
             );
 
             breakdown.put(service.name(), price);
@@ -1030,8 +976,7 @@ public class BookingService {
         }
 
         return new BookingPricePreviewResponse(
-                total,
-                breakdown,
+                total, breakdown,
                 provider.getUser().getName(),
                 slot.getStartTime().toString(),
                 slot.getEndTime().toString(),
@@ -1051,6 +996,18 @@ public class BookingService {
         }
     }
 
+    // =========================================================
+    // GET PROVIDER OPTIONS — 3-tier geo matching
+    //
+    // OLD: providerRepository.findByCityIgnoreCase(userCity)
+    //      → every provider in the city regardless of distance
+    //
+    // NEW: Tier 1 — exact pincode match (provider opted in)
+    //      Tier 2 — radius match via Haversine (home coords)
+    //      Tier 3 — city + willingToTravel flag (last resort)
+    //      → scored and sorted so nearest / best match is first
+    // =========================================================
+
     public List<ProviderOptionDTO> getProviderOptions(BookingPreviewRequestDTO request) {
 
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -1058,65 +1015,191 @@ public class BookingService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        String userCity = user.getCity();
+        String userCity    = user.getCity();
+        String userPincode = user.getPincode();     // may be null for old users
+        Double userLat     = user.getLatitude();    // may be null for old users
+        Double userLng     = user.getLongitude();   // may be null for old users
 
-        List<Provider> providers = providerRepository.findByCityIgnoreCase(userCity);
+        // Collect candidates — use a map keyed by provider id to avoid duplicates.
+        // Value is the ProviderOptionDTO so we can attach distance + matchReason.
+        Map<Long, ProviderOptionDTO> candidates = new LinkedHashMap<>();
 
-        List<ProviderOptionDTO> result = new ArrayList<>();
+        // ── Tier 1: exact pincode match ──────────────────────
+        if (userPincode != null && !userPincode.isBlank()) {
 
-        for (Provider provider : providers) {
+            List<Provider> tier1 = providerRepository.findVerifiedByServiceablePincode(userPincode);
 
-            List<ProviderAvailability> slots = availabilityRepository.findByProvider(provider);
+            for (Provider provider : tier1) {
 
-            boolean hasValidSlot = slots.stream().anyMatch(slot ->
-                    slot.isActive() && slot.getDate().isEqual(request.getStartDate())
-            );
-
-            if (!hasValidSlot) continue;
-
-            boolean validProvider = true;
-            double total = 0;
-            Map<String, Double> breakdown = new HashMap<>();
-
-            for (BookingServiceRequestDTO s : request.getServices()) {
-
-                ServicePricing pricing = pricingRepository
-                        .findByProviderAndServiceAndCity(provider, s.getServiceType(), userCity)
-                        .orElse(null);
-
-                if (pricing == null) {
-                    validProvider = false;
-                    break;
-                }
-
-                Integer hours = s.getHours();
-                if (hours == null || hours <= 0) hours = 1;
-
-                double price = bookingCalculationService.calculatePrice(
-                        pricing,
-                        s.getServiceType(),
-                        request.getMembers(),
-                        request.getHouseSize(),
-                        hours
+                ProviderOptionDTO dto = buildProviderDTO(
+                        provider, request, userCity, userLat, userLng, "PINCODE_MATCH"
                 );
 
-                breakdown.put(s.getServiceType().name(), price);
-                total += price;
+                if (dto != null) {
+                    candidates.put(provider.getId(), dto);
+                }
             }
-
-            if (!validProvider) continue;
-
-            result.add(new ProviderOptionDTO(
-                    provider.getId(),
-                    provider.getUser().getName(),
-                    provider.getRating(),
-                    provider.getExperienceYears(),
-                    total,
-                    breakdown,
-                    provider.getProfilePhotoUrl()
-            ));
         }
 
+        // ── Tier 2: radius match (Haversine) ─────────────────
+        if (userLat != null && userLng != null) {
+
+            List<Provider> geoPool = providerRepository.findVerifiedWithGeoInCity(userCity);
+
+            for (Provider provider : geoPool) {
+
+                // Skip if already matched in Tier 1
+                if (candidates.containsKey(provider.getId())) continue;
+
+                double radius = provider.getTravelRadiusKm() != null
+                        ? provider.getTravelRadiusKm()
+                        : 10.0;
+
+                boolean withinRadius = GeoUtil.isWithinRadius(
+                        provider.getHomeLatitude(), provider.getHomeLongitude(),
+                        userLat, userLng,
+                        radius
+                );
+
+                if (withinRadius) {
+                    ProviderOptionDTO dto = buildProviderDTO(
+                            provider, request, userCity, userLat, userLng, "RADIUS_MATCH"
+                    );
+                    if (dto != null) {
+                        candidates.put(provider.getId(), dto);
+                    }
+                }
+            }
+        }
+
+        // ── Tier 3: city + willingToTravel (fallback) ────────
+        // Only used if Tier 1 + 2 produced no results, or user
+        // has no geo data (old accounts).
+        if (candidates.isEmpty()) {
+
+            List<Provider> tier3 = providerRepository.findVerifiedWillingToTravelInCity(userCity);
+
+            for (Provider provider : tier3) {
+                ProviderOptionDTO dto = buildProviderDTO(
+                        provider, request, userCity, userLat, userLng, "CITY_MATCH"
+                );
+                if (dto != null) {
+                    candidates.put(provider.getId(), dto);
+                }
+            }
+        }
+
+        // ── Score and sort results ────────────────────────────
+        List<ProviderOptionDTO> result = new ArrayList<>(candidates.values());
+
+        result.sort(Comparator.comparingDouble(dto -> -scoreProvider(dto)));
+
         return result;
+    }
+
+    // =========================================================
+    // PRIVATE — build ProviderOptionDTO for one provider
+    //
+    // Checks slot availability and pricing, same logic as before.
+    // Returns null if provider can't serve this request.
+    // =========================================================
+
+    private ProviderOptionDTO buildProviderDTO(
+            Provider provider,
+            BookingPreviewRequestDTO request,
+            String userCity,
+            Double userLat,
+            Double userLng,
+            String matchReason
+    ) {
+        // Check slot availability for requested date
+        List<ProviderAvailability> slots = availabilityRepository.findByProvider(provider);
+
+        boolean hasValidSlot = slots.stream().anyMatch(slot ->
+                slot.isActive() && slot.getDate().isEqual(request.getStartDate())
+        );
+
+        if (!hasValidSlot) return null;
+
+        // Check pricing is available for all requested services
+        double total = 0;
+        Map<String, Double> breakdown = new HashMap<>();
+
+        for (BookingServiceRequestDTO s : request.getServices()) {
+
+            ServicePricing pricing = pricingRepository
+                    .findByProviderAndServiceAndCity(provider, s.getServiceType(), userCity)
+                    .orElse(null);
+
+            if (pricing == null) return null;
+
+            Integer hours = s.getHours();
+            if (hours == null || hours <= 0) hours = 1;
+
+            double price = bookingCalculationService.calculatePrice(
+                    pricing, s.getServiceType(),
+                    request.getMembers(), request.getHouseSize(), hours
+            );
+
+            breakdown.put(s.getServiceType().name(), price);
+            total += price;
+        }
+
+        // Compute distance if we have both sets of coordinates
+        double distanceKm = -1;
+        if (userLat != null && userLng != null
+                && provider.getHomeLatitude() != null
+                && provider.getHomeLongitude() != null) {
+            distanceKm = GeoUtil.distanceKm(
+                    provider.getHomeLatitude(), provider.getHomeLongitude(),
+                    userLat, userLng
+            );
+        }
+
+        return new ProviderOptionDTO(
+                provider.getId(),
+                provider.getUser().getName(),
+                provider.getRating(),
+                provider.getExperienceYears(),
+                total,
+                breakdown,
+                provider.getProfilePhotoUrl(),
+                distanceKm,
+                matchReason
+        );
+    }
+
+    // =========================================================
+    // PRIVATE — score a provider option for sorting
+    //
+    // Higher score = shown first to the customer.
+    //
+    // Points breakdown:
+    //   Match reason :  PINCODE_MATCH=30  RADIUS_MATCH=20  CITY_MATCH=5
+    //   Rating       :  up to 25 pts  (rating / 5.0 * 25)
+    //   Distance     :  up to 20 pts  (closer = more pts; ignored if unknown)
+    //   Experience   :  up to 10 pts  (capped at 10 yrs)
+    // =========================================================
+
+    private double scoreProvider(ProviderOptionDTO dto) {
+
+        double score = 0;
+
+        switch (dto.getMatchReason()) {
+            case "PINCODE_MATCH" -> score += 30;
+            case "RADIUS_MATCH"  -> score += 20;
+            case "CITY_MATCH"    -> score += 5;
+        }
+
+        score += (dto.getRating() / 5.0) * 25;
+
+        if (dto.getDistanceKm() >= 0) {
+            // 0 km → 20 pts; 50+ km → 0 pts (linear decay)
+            score += Math.max(0, 20 - (dto.getDistanceKm() / 50.0) * 20);
+        }
+
+        score += Math.min(dto.getExperienceYears(), 10);
+
+        return score;
     }
 }
