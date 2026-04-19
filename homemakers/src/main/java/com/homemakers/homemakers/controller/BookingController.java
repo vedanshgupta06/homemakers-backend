@@ -227,6 +227,7 @@ public List<BookingResponse> getProviderBookings(Authentication authentication) 
         return bookingService.createBooking(request, authentication.getName());
     }
     @PostMapping("/provider-options")
+    @PreAuthorize("hasRole('USER')")
     public List<ProviderOptionDTO> getProviderOptions(
             @RequestBody BookingPreviewRequestDTO request
     ) {
