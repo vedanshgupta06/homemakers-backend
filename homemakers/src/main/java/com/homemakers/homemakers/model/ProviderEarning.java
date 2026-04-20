@@ -52,7 +52,13 @@ public class ProviderEarning {
         createdAt = LocalDateTime.now();
     }
     private int weekNo;
+    // Add this field
+    @Column(nullable = true)
+    private String reason;
 
+    // getter + setter
+    public String getReason() { return reason; }
+    public void setReason(String reason) { this.reason = reason; }
 
     // ========================
     // GETTERS
