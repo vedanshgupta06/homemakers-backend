@@ -73,4 +73,17 @@ public class ProviderAttendanceController {
 
         return ResponseEntity.ok(logs);
     }
+    @PutMapping("/{id}/mark-leave")
+    public ResponseEntity<?> markLeave(
+            @PathVariable Long id,
+            Authentication authentication
+    ) {
+        String email = authentication.getName();
+        Provider provider = providerRepository
+                .findByUserEmail(email)
+                .orElseThrow(() -> new RuntimeException("Provider not found"));
+
+        workLogService.markLeave(id, provider);
+        return ResponseEntity.ok("Marked as leave");
+    }
 }
