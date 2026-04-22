@@ -1,5 +1,7 @@
 package com.homemakers.homemakers.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -26,8 +28,9 @@ public class ProviderAvailability {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "provider_id")
+    @JsonIgnoreProperties({"availabilities", "hibernateLazyInitializer", "handler"})
     private Provider provider;
-
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
     private LocalDate date;
 
     private LocalTime startTime;
