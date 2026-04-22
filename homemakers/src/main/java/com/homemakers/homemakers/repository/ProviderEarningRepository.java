@@ -86,4 +86,6 @@ WHERE e.provider = :provider
     List<ProviderEarning> findByPayoutForUpdate(@Param("payout") ProviderPayout payout);
     long countByProviderAndBooking(Provider provider, Booking booking);
     boolean existsByBooking_Id(Long bookingId);
+
+    List<ProviderEarning> findByProvider_User_EmailOrderByWorkDateDesc(String email);
 }
