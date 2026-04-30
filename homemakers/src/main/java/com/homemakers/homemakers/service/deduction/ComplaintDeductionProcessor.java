@@ -38,6 +38,7 @@ public class ComplaintDeductionProcessor {
                 event.getProviderId(),
                 DeductionSourceType.COMPLAINT,
                 event.getComplaintId(),
+                event.getBookingId(), // ← add
                 result
         );
     }
