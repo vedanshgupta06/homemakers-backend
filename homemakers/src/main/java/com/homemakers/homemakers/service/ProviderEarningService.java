@@ -35,7 +35,6 @@ public class ProviderEarningService {
 
         WorkStatus status = log.getStatus();
 
-        // ✅ Only allow CONFIRMED_PRESENT or LEAVE
         if (status != WorkStatus.CONFIRMED_PRESENT &&
                 status != WorkStatus.LEAVE) {
             return;
@@ -49,10 +48,8 @@ public class ProviderEarningService {
             return;
         }
 
-        // 🔒 Stop service after 30 calendar days
-//        LocalDate serviceStart = booking.getCreatedAt().toLocalDate();
-          LocalDate serviceStart = booking.getAvailability().getDate();
-          LocalDate serviceEnd = serviceStart.plusDays(29);
+        LocalDate serviceStart = booking.getAvailability().getDate();
+        LocalDate serviceEnd = serviceStart.plusDays(29);
 
         if (workDate.isAfter(serviceEnd)) {
             booking.setStatus(BookingStatus.COMPLETED);
@@ -60,35 +57,23 @@ public class ProviderEarningService {
             return;
         }
 
-        // 🔒 Prevent duplicate earning for same date
-        boolean exists =
-                earningRepository.existsByProviderAndBookingAndWorkDate(
-                        provider,
-                        booking,
-                        workDate
-                );
+        boolean exists = earningRepository.existsByProviderAndBookingAndWorkDate(
+                provider, booking, workDate
+        );
 
-        if (exists) {
-            return;
-        }
+        if (exists) return;
 
         double dailyRate = booking.getTotalPrice() / 30.0;
         double amount = 0;
 
-        // ✅ Customer confirmed present
         if (status == WorkStatus.CONFIRMED_PRESENT) {
             amount = dailyRate;
-        }
 
-        // ✅ Leave (only if PAID)
-        else if (status == WorkStatus.LEAVE) {
+        } else if (status == WorkStatus.LEAVE) {
 
-            boolean isPaidLeave =
-                    leaveLedgerRepository.existsByProviderAndBookingAndLeaveDateAndLeaveType(
-                            provider,
-                            booking,
-                            workDate,
-                            LeaveType.PAID
+            boolean isPaidLeave = leaveLedgerRepository
+                    .existsByProviderAndBookingAndLeaveDateAndLeaveType(
+                            provider, booking, workDate, LeaveType.PAID
                     );
 
             if (isPaidLeave) {
@@ -96,9 +81,7 @@ public class ProviderEarningService {
             }
         }
 
-        if (amount <= 0) {
-            return;
-        }
+        if (amount <= 0) return;
 
         ProviderEarning earning = new ProviderEarning();
         earning.setProvider(provider);
@@ -106,9 +89,11 @@ public class ProviderEarningService {
         earning.setWorkDate(workDate);
         earning.setAmount(amount);
         earning.setStatus(EarningStatus.AVAILABLE);
+        earning.setReason("Daily earning for work on " + workDate);
 
         earningRepository.save(earning);
     }
+
     public void addBonusEarning(Provider provider,
                                 Booking booking,
                                 double amount,
@@ -122,9 +107,29 @@ public class ProviderEarningService {
         earning.setWorkDate(date);
         earning.setAmount(amount);
         earning.setStatus(EarningStatus.AVAILABLE);
+        earning.setReason("Bonus for paid leaves on booking #" + booking.getId());
 
         earningRepository.save(earning);
     }
+
+    // ✅ NEW — saves a negative earning as penalty with clear reason
+    @Transactional
+    public void addPenaltyEarning(Provider provider,
+                                  Booking booking,
+                                  double penaltyAmount,
+                                  String reason) {
+
+        ProviderEarning earning = new ProviderEarning();
+        earning.setProvider(provider);
+        earning.setBooking(booking);
+        earning.setWorkDate(LocalDate.now());
+        earning.setAmount(-penaltyAmount); // ✅ negative = deduction
+        earning.setStatus(EarningStatus.PENALTY);
+        earning.setReason(reason); // ✅ clear reason shown in history
+
+        earningRepository.save(earning);
+    }
+
     public boolean existsBonusForBooking(Long bookingId) {
         return earningRepository.existsByBooking_Id(bookingId);
     }

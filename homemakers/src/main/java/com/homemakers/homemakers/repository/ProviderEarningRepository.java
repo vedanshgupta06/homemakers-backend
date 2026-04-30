@@ -88,4 +88,6 @@ WHERE e.provider = :provider
     boolean existsByBooking_Id(Long bookingId);
 
     List<ProviderEarning> findByProvider_User_EmailOrderByWorkDateDesc(String email);
+
+
 }

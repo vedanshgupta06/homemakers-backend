@@ -1,5 +1,6 @@
 package com.homemakers.homemakers.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;
 
@@ -20,11 +21,18 @@ public class ProviderEarning {
     // RELATIONS
     // ========================
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "availabilities", "earnings"})
     private Provider provider;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "booking_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "provider", "availability", "user"})
     private Booking booking;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payout_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+    private ProviderPayout payout;
 
     // ========================
     // EARNING DATA of providers
@@ -39,9 +47,6 @@ public class ProviderEarning {
     private LocalDateTime createdAt;
     @Version
     private Long version;
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "payout_id")
-    private ProviderPayout payout;
     private LocalDate workDate;
 
     // ========================
