@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+
 @Service
 public class ProviderService {
 
@@ -50,31 +51,43 @@ public class ProviderService {
     @Transactional
     public Provider registerProvider(ProviderRegisterRequest request, User user) {
 
-        // Prevent duplicate provider registration
         if (providerRepo.existsByUser(user)) {
             throw new IllegalStateException("User already registered as provider");
         }
 
-        // Validate services
         if (request.getServices() == null || request.getServices().isEmpty()) {
             throw new RuntimeException("Provider must select at least one service");
         }
 
-        // Assign PROVIDER role
         user.setRole(Role.PROVIDER);
         userRepo.save(user);
 
         Provider provider = new Provider();
-
         provider.setUser(user);
         provider.setCity(request.getCity());
         provider.setExperienceYears(request.getExperienceYears());
         provider.setPricePerHour(request.getPricePerHour());
-
-        // Convert services list → set
         provider.setServices(new HashSet<>(request.getServices()));
 
-        // Default values
+        // ── geo fields ──
+        if (request.getHomeLatitude() != null) {
+            provider.setHomeLatitude(request.getHomeLatitude());
+        }
+        if (request.getHomeLongitude() != null) {
+            provider.setHomeLongitude(request.getHomeLongitude());
+        }
+        // Default radius to 10 km if not provided
+        provider.setTravelRadiusKm(
+                request.getTravelRadiusKm() != null ? request.getTravelRadiusKm() : 10
+        );
+        provider.setWillingToTravel(
+                request.getWillingToTravel() != null ? request.getWillingToTravel() : false
+        );
+        if (request.getServiceablePincodes() != null && !request.getServiceablePincodes().isEmpty()) {
+            provider.setServiceablePincodes(request.getServiceablePincodes());
+        }
+
+        // Defaults
         provider.setVerified(false);
         provider.setRating(0.0);
         provider.setTotalRatings(0);
@@ -132,12 +145,15 @@ public class ProviderService {
         return providerRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
     }
+
+    // =====================================================
+    // UPDATE PROVIDER PROFILE (includes geo fields)
+    // =====================================================
     @Transactional
     public Provider updateProviderProfile(
             String email,
             ProviderProfileUpdateRequest request
     ) {
-
         Provider provider = providerRepo.findByUser_Email(email)
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
@@ -149,8 +165,29 @@ public class ProviderService {
             provider.setServices(new HashSet<>(request.getServices()));
         }
 
+        // ── geo fields (only update if provided) ──
+        if (request.getHomeLatitude() != null) {
+            provider.setHomeLatitude(request.getHomeLatitude());
+        }
+        if (request.getHomeLongitude() != null) {
+            provider.setHomeLongitude(request.getHomeLongitude());
+        }
+        if (request.getTravelRadiusKm() != null) {
+            provider.setTravelRadiusKm(request.getTravelRadiusKm());
+        }
+        if (request.getWillingToTravel() != null) {
+            provider.setWillingToTravel(request.getWillingToTravel());
+        }
+        if (request.getServiceablePincodes() != null && !request.getServiceablePincodes().isEmpty()) {
+            provider.setServiceablePincodes(request.getServiceablePincodes());
+        }
+
         return providerRepo.save(provider);
     }
+
+    // =====================================================
+    // UPLOAD PROFILE PHOTO
+    // =====================================================
     @Transactional
     public Provider uploadProfilePhoto(
             String email,
@@ -161,22 +198,21 @@ public class ProviderService {
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
         String uploadDir = "uploads/providers/";
-
         File directory = new File(uploadDir);
-        if (!directory.exists()) {
-            directory.mkdirs();
-        }
+        if (!directory.exists()) directory.mkdirs();
 
         String fileName = provider.getId() + "_" + file.getOriginalFilename();
-
         Path filePath = Paths.get(uploadDir + fileName);
-
         Files.write(filePath, file.getBytes());
 
         provider.setProfilePhotoUrl("/providers/" + fileName);
 
         return providerRepo.save(provider);
     }
+
+    // =====================================================
+    // UPLOAD DOCUMENTS
+    // =====================================================
     @Transactional
     public Provider uploadDocuments(
             String email,
@@ -188,23 +224,14 @@ public class ProviderService {
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
         String uploadDir = "uploads/provider-documents/";
-
         File directory = new File(uploadDir);
-        if (!directory.exists()) {
-            directory.mkdirs();
-        }
+        if (!directory.exists()) directory.mkdirs();
 
-        String idProofName =
-                provider.getId() + "_id_" + idProof.getOriginalFilename();
+        String idProofName      = provider.getId() + "_id_" + idProof.getOriginalFilename();
+        String addressProofName = provider.getId() + "_address_" + addressProof.getOriginalFilename();
 
-        String addressProofName =
-                provider.getId() + "_address_" + addressProof.getOriginalFilename();
-
-        Path idProofPath = Paths.get(uploadDir + idProofName);
-        Path addressProofPath = Paths.get(uploadDir + addressProofName);
-
-        Files.write(idProofPath, idProof.getBytes());
-        Files.write(addressProofPath, addressProof.getBytes());
+        Files.write(Paths.get(uploadDir + idProofName),      idProof.getBytes());
+        Files.write(Paths.get(uploadDir + addressProofName), addressProof.getBytes());
 
         provider.setIdProofUrl("/provider-documents/" + idProofName);
         provider.setAddressProofUrl("/provider-documents/" + addressProofName);
