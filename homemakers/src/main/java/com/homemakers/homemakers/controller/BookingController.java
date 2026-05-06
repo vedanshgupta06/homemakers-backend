@@ -18,12 +18,11 @@ import java.util.Set;
 @RequestMapping("/api/bookings")
 public class BookingController {
 
-    private final BookingService bookingService;
-    private final BookingRepository bookingRepository;
-    private final ReviewRepository reviewRepository;
+    private final BookingService            bookingService;
+    private final BookingRepository         bookingRepository;
+    private final ReviewRepository          reviewRepository;
     private final ProviderWorkLogRepository workLogRepository;
 
-    // Phone is only shown to provider once booking is confirmed or beyond
     private static final Set<BookingStatus> PHONE_VISIBLE_STATUSES = Set.of(
             BookingStatus.CONFIRMED,
             BookingStatus.SERVICE_IN_PROGRESS,
@@ -35,9 +34,9 @@ public class BookingController {
                              BookingRepository bookingRepository,
                              ProviderWorkLogRepository workLogRepository,
                              ReviewRepository reviewRepository) {
-        this.bookingService = bookingService;
+        this.bookingService    = bookingService;
         this.bookingRepository = bookingRepository;
-        this.reviewRepository = reviewRepository;
+        this.reviewRepository  = reviewRepository;
         this.workLogRepository = workLogRepository;
     }
 
@@ -69,12 +68,16 @@ public class BookingController {
     }
 
     /* ======================================================
-       PROVIDER – TERMINATE BOOKING
+       PROVIDER / USER / ADMIN – TERMINATE BOOKING
        ====================================================== */
     @PutMapping("/{id}/terminate")
     @PreAuthorize("hasAnyRole('PROVIDER','USER','ADMIN')")
-    public Booking terminateBooking(@PathVariable Long id) {
-        return bookingService.terminateBooking(id);
+    public Booking terminateBooking(
+            @PathVariable Long id,
+            @RequestBody(required = false) TerminateBookingRequest request) {
+
+        String reason = (request != null) ? request.getReason() : null;
+        return bookingService.terminateBooking(id, reason);
     }
 
     /* ======================================================
@@ -108,65 +111,48 @@ public class BookingController {
 
             List<ProviderWorkLog> logs = workLogRepository.findByBookingId(booking.getId());
 
-            int totalDays = 0;
-            int chargeableDays = 0;
-            int holidays = 0;
-
+            int totalDays = 0, chargeableDays = 0, holidays = 0;
             for (ProviderWorkLog log : logs) {
-                WorkStatus status = log.getStatus();
-                if (status == WorkStatus.REJECTED) continue;
+                WorkStatus ws = log.getStatus();
+                if (ws == WorkStatus.REJECTED) continue;
                 totalDays++;
-                if (status == WorkStatus.PRESENT || status == WorkStatus.CONFIRMED_PRESENT) {
-                    chargeableDays++;
-                } else if (status == WorkStatus.LEAVE) {
-                    holidays++;
-                }
+                if (ws == WorkStatus.PRESENT || ws == WorkStatus.CONFIRMED_PRESENT) chargeableDays++;
+                else if (ws == WorkStatus.LEAVE) holidays++;
             }
 
             BookingStatus bookingStatus = booking.getStatus();
 
-            // ✅ Phone: only revealed after booking is confirmed or active
-            String customerPhone = PHONE_VISIBLE_STATUSES.contains(bookingStatus)
-                    && booking.getUser() != null
-                    ? booking.getUser().getPhone()   // adjust if your User field is different
-                    : null;
+            boolean phoneVisible = PHONE_VISIBLE_STATUSES.contains(bookingStatus)
+                    && booking.getUser() != null;
 
-            // ✅ Address: built from User — adjust getAddress() to match your User model
-            String serviceAddress = null;
-            if (booking.getUser() != null && booking.getUser().getAddress() != null) {
-                serviceAddress = booking.getUser().getAddress();
-            }
-
-            // ✅ Customer note: from Booking entity (newly added field)
-            String customerNote = booking.getCustomerNote();
-
-            // ✅ Amount: finalPayableAmount is the actual charged amount after wallet deductions
-            //    Falls back to totalPrice if finalPayableAmount hasn't been set yet
-            Double totalAmount = (booking.getFinalPayableAmount() != null && booking.getFinalPayableAmount() > 0)
+            Double totalAmount = (booking.getFinalPayableAmount() != null
+                    && booking.getFinalPayableAmount() > 0)
                     ? booking.getFinalPayableAmount()
                     : booking.getTotalPrice();
 
-            return new BookingResponse(
-                    booking.getId(),
-                    bookingStatus,
-                    booking.getUser() != null ? booking.getUser().getName() : "N/A",
-                    customerPhone,                                                        // ✅ NEW
-                    serviceAddress,                                                       // ✅ NEW
-                    customerNote,                                                         // ✅ NEW
-                    booking.getAvailability() != null
-                            ? booking.getAvailability().getDate().toString() : "-",
-                    new java.util.ArrayList<>(booking.getServices()),
-                    booking.getBookingStartTime() != null
-                            ? booking.getBookingStartTime().toString() : "-",
-                    booking.getBookingEndTime() != null
-                            ? booking.getBookingEndTime().toString() : "Ongoing",
-                    booking.getPaymentStatus() != null
-                            ? booking.getPaymentStatus().name() : "PENDING",
-                    totalAmount,                                                          // ✅ NEW
-                    totalDays,
-                    chargeableDays,
-                    totalDays - chargeableDays
-            );
+            return BookingResponse.builder()
+                    .bookingId(booking.getId())
+                    .status(bookingStatus)
+                    .customerName(booking.getUser() != null ? booking.getUser().getName() : "N/A")
+                    .customerPhone(phoneVisible ? booking.getUser().getPhone() : null)
+                    .serviceAddress(booking.getUser() != null ? booking.getUser().getAddress() : null)
+                    .customerNote(booking.getCustomerNote())
+                    .terminationReason(bookingStatus == BookingStatus.TERMINATED  // ✅
+                            ? booking.getTerminationReason() : null)
+                    .serviceDate(booking.getAvailability() != null
+                            ? booking.getAvailability().getDate().toString() : "-")
+                    .services(new java.util.ArrayList<>(booking.getServices()))
+                    .startTime(booking.getBookingStartTime() != null
+                            ? booking.getBookingStartTime().toString() : "-")
+                    .endTime(booking.getBookingEndTime() != null
+                            ? booking.getBookingEndTime().toString() : "Ongoing")
+                    .paymentStatus(booking.getPaymentStatus() != null
+                            ? booking.getPaymentStatus().name() : "PENDING")
+                    .totalAmount(totalAmount)
+                    .totalDays(totalDays)
+                    .chargeableDays(chargeableDays)
+                    .holidays(holidays)
+                    .build();
 
         }).toList();
     }
@@ -187,9 +173,7 @@ public class BookingController {
     @PreAuthorize("hasRole('USER')")
     public List<Booking> getPaymentRequiredBookings(Authentication auth) {
         return bookingRepository.findByUser_EmailAndPaymentStatus(
-                auth.getName(),
-                PaymentStatus.PAYMENT_REQUIRED
-        );
+                auth.getName(), PaymentStatus.PAYMENT_REQUIRED);
     }
 
     /* ======================================================
@@ -208,7 +192,17 @@ public class BookingController {
                                  Authentication authentication) {
         return bookingService.createBooking(request, authentication.getName());
     }
-
+    /* ======================================================
+       USER – SUBMIT WALLET CONSENT
+       ====================================================== */
+    @PostMapping("/{id}/wallet-consent")
+    @PreAuthorize("hasRole('USER')")
+    public Booking submitWalletConsent(
+            @PathVariable Long id,
+            @RequestParam boolean useWallet,
+            Authentication authentication) {
+        return bookingService.submitWalletConsent(id, useWallet, authentication.getName());
+    }
     @PostMapping("/provider-options")
     @PreAuthorize("hasRole('USER')")
     public List<ProviderOptionDTO> getProviderOptions(
@@ -229,7 +223,6 @@ public class BookingController {
         List<ProviderWorkLog> logs = workLogRepository.findByBookingId(id);
 
         int totalDays = 0, chargeableDays = 0, absent = 0, leave = 0;
-
         for (ProviderWorkLog log : logs) {
             if (log.getStatus() == WorkStatus.REJECTED) continue;
             totalDays++;

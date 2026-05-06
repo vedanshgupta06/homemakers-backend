@@ -324,7 +324,12 @@ public class Booking {
 
     @Column(nullable = true)
     private Double penaltyApplied;
+    @Column(name = "termination_reason", length = 500)
+    private String terminationReason;
 
+    @Enumerated(EnumType.STRING)
+    private WalletConsentStatus walletConsentStatus = WalletConsentStatus.PENDING;
+    private Double walletEligible;
     // ================= GETTERS & SETTERS =================
 
     public Long getId() { return id; }
@@ -418,4 +423,28 @@ public class Booking {
 
     public Double getPenaltyApplied() { return penaltyApplied; }
     public void setPenaltyApplied(Double penaltyApplied) { this.penaltyApplied = penaltyApplied; }
+
+    public String getTerminationReason() {
+        return terminationReason;
+    }
+
+    public void setTerminationReason(String terminationReason) {
+        this.terminationReason = terminationReason;
+    }
+
+    public WalletConsentStatus getWalletConsentStatus() {
+        return walletConsentStatus;
+    }
+
+    public void setWalletConsentStatus(WalletConsentStatus walletConsentStatus) {
+        this.walletConsentStatus = walletConsentStatus;
+    }
+
+    public Double getWalletEligible() {
+        return walletEligible;
+    }
+
+    public void setWalletEligible(Double walletEligible) {
+        this.walletEligible = walletEligible;
+    }
 }
