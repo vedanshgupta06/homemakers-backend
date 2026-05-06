@@ -16,20 +16,17 @@ public class ReviewService {
     private final BookingRepository bookingRepository;
     private final UserRepository userRepository;
     private final ProviderRepository providerRepository;
-    private final ComplaintDeductionProcessor complaintDeductionProcessor;
 
     public ReviewService(
             ReviewRepository reviewRepository,
             BookingRepository bookingRepository,
             UserRepository userRepository,
-            ProviderRepository providerRepository,
-            ComplaintDeductionProcessor complaintDeductionProcessor
+            ProviderRepository providerRepository
     ) {
         this.reviewRepository = reviewRepository;
         this.bookingRepository = bookingRepository;
         this.userRepository = userRepository;
         this.providerRepository = providerRepository;
-        this.complaintDeductionProcessor = complaintDeductionProcessor;
     }
 
     @Transactional
@@ -79,25 +76,6 @@ public class ReviewService {
         providerRepository.save(provider);
         Review savedReview = reviewRepository.save(review);
 
-        // 🔥 AUTOMATIC COMPLAINT → DEDUCTION FLOW
-        ComplaintSeverity severity;
-        if (savedReview.getRating() <= 2) {
-            severity = ComplaintSeverity.HIGH;
-        } else if (savedReview.getRating() == 3) {
-            severity = ComplaintSeverity.MEDIUM;
-        } else {
-            severity = ComplaintSeverity.LOW;
-        }
-
-        ComplaintEvent event = new ComplaintEvent(
-                savedReview.getId(),               // complaintId
-                provider.getId(),                  // providerId
-                booking.getId(),                   // bookingId
-                severity,
-                true                               // validated (MVP)
-        );
-
-        complaintDeductionProcessor.process(event);
 
         return savedReview;
     }
