@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 
 @Service
@@ -18,6 +19,7 @@ public class BookingExpiryService {
     private final ProviderPenaltyLedgerRepository penaltyLedgerRepository;
     private final PaymentTransactionRepository paymentTransactionRepository;
     private final ProviderEarningService earningService;
+    private final ProviderNotificationService notificationService;
 
     private static final double PENALTY_AMOUNT = 200.0;
 
@@ -27,7 +29,8 @@ public class BookingExpiryService {
             ProviderAvailabilityRepository availabilityRepository,
             ProviderPenaltyLedgerRepository penaltyLedgerRepository,
             PaymentTransactionRepository paymentTransactionRepository,
-            ProviderEarningService earningService
+            ProviderEarningService earningService,
+            ProviderNotificationService notificationService
     ) {
         this.bookingRepository = bookingRepository;
         this.userWalletService = userWalletService;
@@ -35,12 +38,18 @@ public class BookingExpiryService {
         this.penaltyLedgerRepository = penaltyLedgerRepository;
         this.paymentTransactionRepository = paymentTransactionRepository;
         this.earningService = earningService;
+        this.notificationService = notificationService;
     }
 
-    @Scheduled(fixedRate = 60 * 60 * 1000)
+    // =========================================================
+    // Job 1 — Cancel/Penalty runner (every 15 minutes)
+    // ✅ FIXED: Now checks full DateTime (date + booking start
+    //    time) so a 10 AM slot is caught at 10 AM, not next day
+    // =========================================================
+    @Scheduled(fixedRate = 15 * 60 * 1000)
     public void expireOldBookings() {
 
-        // ── Job 1: Cancel PENDING bookings older than 2 days ──
+        // ── Cancel PENDING bookings older than 2 days ──
         LocalDateTime expiryTime = LocalDateTime.now().minusDays(2);
 
         List<Booking> expiredPending =
@@ -52,20 +61,29 @@ public class BookingExpiryService {
             cancelAndRefund(booking, false);
         }
 
-        // ── Job 2: Cancel CONFIRMED bookings whose scheduled date has passed ──
-        LocalDate today = LocalDate.now();
+        // ── Cancel CONFIRMED bookings whose scheduled date+time has passed ──
+        LocalDateTime now = LocalDateTime.now();
 
-        List<Booking> confirmedExpired =
+        List<Booking> confirmedBookings =
                 bookingRepository.findByStatus(BookingStatus.CONFIRMED);
 
-        for (Booking booking : confirmedExpired) {
+        for (Booking booking : confirmedBookings) {
             LocalDate scheduledDate = booking.getAvailability().getDate();
-            if (scheduledDate.isBefore(today)) {
+            LocalTime scheduledTime = booking.getBookingStartTime();
+
+            // ✅ Use full DateTime — fall back to midnight if no time set
+            LocalDateTime scheduledDateTime = (scheduledTime != null)
+                    ? LocalDateTime.of(scheduledDate, scheduledTime)
+                    : LocalDateTime.of(scheduledDate, LocalTime.MIDNIGHT);
+
+            if (scheduledDateTime.isBefore(now)) {
+                System.out.println("⏰ Booking #" + booking.getId()
+                        + " scheduled for " + scheduledDateTime + " has passed. Cancelling...");
                 cancelAndRefund(booking, true);
             }
         }
 
-        // ── Job 3: Safety net — catch CANCELLED bookings with still-PAID Stripe txns ──
+        // ── Safety net — catch CANCELLED bookings with still-PAID Stripe txns ──
         List<Booking> cancelledBookings =
                 bookingRepository.findByStatus(BookingStatus.CANCELLED);
 
@@ -106,6 +124,73 @@ public class BookingExpiryService {
         }
     }
 
+    // =========================================================
+    // Job 2 — Time-aware reminder sender (every 15 minutes)
+    // ✅ Sends reminders relative to actual booking start time:
+    //    - 60–75 min before  → "Start soon" reminder
+    //    - 15–30 min before  → Final warning
+    //
+    // Example: slot is 6 May 10:00 AM
+    //   → Reminder fires between 8:45–9:00 AM
+    //   → Final warning fires between 9:30–9:45 AM
+    //
+    // This correctly handles late accepts too — if provider
+    // accepts at 9:50 AM for a 10:00 AM slot, they immediately
+    // get the final warning on next scheduler tick.
+    // =========================================================
+    @Scheduled(fixedRate = 15 * 60 * 1000)
+    public void sendTimeAwareReminders() {
+
+        LocalDateTime now = LocalDateTime.now();
+
+        List<Booking> confirmed = bookingRepository.findByStatus(BookingStatus.CONFIRMED);
+
+        for (Booking booking : confirmed) {
+
+            // Only notify for PAID bookings
+            if (booking.getPaymentStatus() != PaymentStatus.PAID) continue;
+
+            LocalDate scheduledDate = booking.getAvailability().getDate();
+            LocalTime scheduledTime = booking.getBookingStartTime();
+
+            if (scheduledTime == null) continue;
+
+            LocalDateTime scheduledDateTime = LocalDateTime.of(scheduledDate, scheduledTime);
+
+            // Skip if already past
+            if (scheduledDateTime.isBefore(now)) continue;
+
+            long minutesUntilStart = java.time.Duration.between(now, scheduledDateTime).toMinutes();
+
+            String displayDateTime = scheduledDate.toString() + " at " + formatTime(scheduledTime);
+
+            // ── 1-hour reminder: 60–75 minutes before start ──
+            if (minutesUntilStart <= 75 && minutesUntilStart > 45) {
+                notificationService.startDateReminder(
+                        booking.getProvider(),
+                        booking.getId(),
+                        displayDateTime
+                );
+                System.out.println("🔔 1-hour reminder sent for booking #" + booking.getId()
+                        + " (starts at " + scheduledDateTime + ")");
+            }
+
+            // ── Final warning: 15–30 minutes before start ──
+            if (minutesUntilStart <= 30 && minutesUntilStart > 0) {
+                notificationService.startDateFinalWarning(
+                        booking.getProvider(),
+                        booking.getId(),
+                        displayDateTime
+                );
+                System.out.println("🚨 Final warning sent for booking #" + booking.getId()
+                        + " (starts at " + scheduledDateTime + ")");
+            }
+        }
+    }
+
+    // =========================================================
+    // cancelAndRefund
+    // =========================================================
     private void cancelAndRefund(Booking booking, boolean applyPenalty) {
 
         System.out.println("🔄 Processing booking #" + booking.getId()
@@ -114,9 +199,7 @@ public class BookingExpiryService {
                 + " | walletUsed=" + booking.getWalletUsed()
                 + " | finalPayable=" + booking.getFinalPayableAmount());
 
-        // ── Step 1: Resolve Stripe transactions first ──
-        // Find the total amount already being refunded via Stripe
-        // so we don't double-credit any wallet portion covered by Stripe.
+        // ── Step 1: Resolve Stripe transactions ──
         List<PaymentTransaction> txns =
                 paymentTransactionRepository.findAllByBookingId(booking.getId());
 
@@ -132,7 +215,6 @@ public class BookingExpiryService {
         if (walletUsed > 0) {
 
             if (booking.getStatus() == BookingStatus.PENDING) {
-                // PENDING — wallet was only reserved, never charged. Release the hold.
                 userWalletService.releaseReservedAmount(
                         booking.getUser().getId(),
                         booking.getId(),
@@ -141,10 +223,6 @@ public class BookingExpiryService {
                 System.out.println("✅ Released wallet reservation: ₹" + walletUsed);
 
             } else if (booking.getStatus() == BookingStatus.CONFIRMED) {
-                // CONFIRMED — wallet was actually debited.
-                // Only refund wallet portion that is NOT already covered by the Stripe refund.
-                // e.g. finalPayable=2000, stripeRefundTotal=1500, walletUsed=500 → refund 500
-                // e.g. finalPayable=2000, stripeRefundTotal=2000, walletUsed=2000 → DON'T refund wallet (Stripe covers it all)
                 double walletRefundAmount = Math.max(0, walletUsed - stripeRefundTotal);
 
                 if (walletRefundAmount > 0) {
@@ -153,7 +231,7 @@ public class BookingExpiryService {
                             walletRefundAmount,
                             "Wallet refund ₹" + (int) walletRefundAmount +
                                     " — Booking #" + booking.getId() +
-                                    " cancelled (provider did not show up on scheduled date)"
+                                    " cancelled (provider did not show up on scheduled time)"
                     );
                     System.out.println("✅ Refunded wallet portion: ₹" + walletRefundAmount);
                 } else {
@@ -169,15 +247,17 @@ public class BookingExpiryService {
             System.out.println("🔍 Found " + txns.size() + " payment txns for booking #" + booking.getId());
 
             for (PaymentTransaction txn : txns) {
-
                 if (txn.getMethod() == PaymentMethod.STRIPE
                         && txn.getStatus() == PaymentStatus.PAID) {
+
+                    String scheduledAt = booking.getAvailability().getDate().toString()
+                            + (booking.getBookingStartTime() != null
+                            ? " at " + formatTime(booking.getBookingStartTime()) : "");
 
                     String refundReason = applyPenalty
                             ? "Refund ₹" + (int) txn.getAmount() +
                             " — Booking #" + booking.getId() +
-                            " cancelled. Provider confirmed for " +
-                            booking.getAvailability().getDate() +
+                            " cancelled. Provider confirmed for " + scheduledAt +
                             " but did not show up. Money added to your wallet."
                             : "Refund ₹" + (int) txn.getAmount() +
                             " — Booking #" + booking.getId() +
@@ -218,8 +298,12 @@ public class BookingExpiryService {
         System.out.println("✅ Booking #" + booking.getId() + " cancelled successfully");
     }
 
+    // =========================================================
+    // applyProviderPenalty
+    // =========================================================
     private void applyProviderPenalty(Booking booking) {
 
+        // ✅ No penalty if user never paid — not the provider's fault
         if (booking.getPaymentStatus() != PaymentStatus.PAID) {
             System.out.println("⏭ Skipping penalty for booking #" + booking.getId() + " — not paid");
             return;
@@ -232,11 +316,14 @@ public class BookingExpiryService {
             return;
         }
 
-        Provider provider = booking.getProvider();
+        Provider provider    = booking.getProvider();
+        String scheduledDate = booking.getAvailability().getDate().toString();
+        String scheduledTime = booking.getBookingStartTime() != null
+                ? " at " + formatTime(booking.getBookingStartTime()) : "";
 
         String reason = "Penalty ₹" + (int) PENALTY_AMOUNT +
                 " — confirmed booking #" + booking.getId() +
-                " for " + booking.getAvailability().getDate() +
+                " for " + scheduledDate + scheduledTime +
                 " but did not start work. Booking cancelled and user refunded.";
 
         ProviderPenaltyLedger penalty = new ProviderPenaltyLedger();
@@ -248,14 +335,31 @@ public class BookingExpiryService {
         penalty.setDeducted(true);
         penaltyLedgerRepository.save(penalty);
 
-        earningService.addPenaltyEarning(
-                provider,
-                booking,
-                PENALTY_AMOUNT,
-                reason
-        );
+        earningService.addPenaltyEarning(provider, booking, PENALTY_AMOUNT, reason);
 
         booking.setPenaltyApplied(PENALTY_AMOUNT);
-        System.out.println("✅ Penalty ₹" + PENALTY_AMOUNT + " applied to provider #" + provider.getId());
+
+        // ✅ Notify provider about cancellation + penalty
+        notificationService.bookingAutoCancelledWithPenalty(
+                provider,
+                booking.getId(),
+                scheduledDate + scheduledTime,
+                PENALTY_AMOUNT
+        );
+
+        System.out.println("✅ Penalty ₹" + PENALTY_AMOUNT
+                + " applied to provider #" + provider.getId());
+    }
+
+    // =========================================================
+    // Helper — formats LocalTime to "10:00 AM" style
+    // =========================================================
+    private String formatTime(LocalTime time) {
+        if (time == null) return "";
+        int hour        = time.getHour();
+        int minute      = time.getMinute();
+        String amPm     = hour >= 12 ? "PM" : "AM";
+        int displayHour = hour % 12 == 0 ? 12 : hour % 12;
+        return String.format("%d:%02d %s", displayHour, minute, amPm);
     }
 }
