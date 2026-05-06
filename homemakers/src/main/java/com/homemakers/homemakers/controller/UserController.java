@@ -122,4 +122,10 @@ public class UserController {
 
         return ResponseEntity.ok(userService.getRecentActivity(email));
     }
+    @GetMapping("/notifications/unread-count")
+    @PreAuthorize("hasRole('USER')")
+    public Map<String, Long> getUnreadCount(Authentication auth) {
+        long count = userService.getUnreadNotificationCount(auth.getName());
+        return Map.of("count", count);
+    }
 }
