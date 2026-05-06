@@ -32,34 +32,29 @@ public class WalletService {
 
         WalletSummaryDTO dto = new WalletSummaryDTO();
 
-        Double available = earningRepository.sumByProviderIdAndStatus(
-                provider.getId(),
-                EarningStatus.AVAILABLE
-        );
+        double available = normalize(earningRepository.sumByProviderIdAndStatus(
+                provider.getId(), EarningStatus.AVAILABLE));
 
-        Double requested = earningRepository.sumByProviderIdAndStatus(
-                provider.getId(),
-                EarningStatus.REQUESTED
-        );
+        double penalty = normalize(earningRepository.sumByProviderIdAndStatus(
+                provider.getId(), EarningStatus.PENALTY)); // already negative
 
-        Double paid = earningRepository.sumByProviderIdAndStatus(
-                provider.getId(),
-                EarningStatus.PAID
-        );
-        dto.setAvailable(normalize(available));
-        dto.setRequested(normalize(requested));
-        dto.setPaid(normalize(paid));
+        double requested = normalize(earningRepository.sumByProviderIdAndStatus(
+                provider.getId(), EarningStatus.REQUESTED));
+
+        double paid = normalize(earningRepository.sumByProviderIdAndStatus(
+                provider.getId(), EarningStatus.PAID));
+
+        double netAvailable = available + penalty; // penalty is negative so it subtracts
+
+        dto.setAvailable(netAvailable);
+        dto.setRequested(requested);
+        dto.setPaid(paid);
 
         ProviderPayout lastPaid =
                 payoutRepository.findTopByProviderAndStatusOrderByPaidAtDesc(
                         provider, PayoutStatus.PAID);
 
-        dto.setAvailable(available);
-        dto.setRequested(requested);
-        dto.setPaid(paid);
-        dto.setLastPayoutDate(
-                lastPaid != null ? lastPaid.getPaidAt() : null
-        );
+        dto.setLastPayoutDate(lastPaid != null ? lastPaid.getPaidAt() : null);
 
         // =========================
         // WEEKLY WITHDRAWAL ELIGIBILITY
@@ -67,31 +62,15 @@ public class WalletService {
         LocalDateTime lastRequested = provider.getLastPayoutRequestedAt();
 
         if (lastRequested == null) {
-
-            dto.setCanWithdraw(available > 0);
+            dto.setCanWithdraw(netAvailable > 0);
             dto.setNextEligibleWithdrawalDate(null);
-
         } else {
-
-            LocalDateTime nextEligible =
-                    lastRequested.plusDays(7);
-
-            boolean canWithdraw =
-                    LocalDateTime.now().isAfter(nextEligible)
-                            && available > 0;
-
+            LocalDateTime nextEligible = lastRequested.plusDays(7);
+            boolean canWithdraw = LocalDateTime.now().isAfter(nextEligible) && netAvailable > 0;
             dto.setCanWithdraw(canWithdraw);
             dto.setNextEligibleWithdrawalDate(nextEligible);
         }
-        System.out.println("Logged in provider id = " + provider.getId());
-        System.out.println("Provider ID = " + provider.getId());
 
-        Double debugSum = earningRepository.sumByProviderIdAndStatus(
-                provider.getId(),
-                EarningStatus.AVAILABLE
-        );
-
-        System.out.println("DEBUG SUM = " + debugSum);
         return dto;
     }
 
@@ -105,13 +84,11 @@ public class WalletService {
                 .stream()
                 .map(p -> {
                     WithdrawalHistoryDTO dto = new WithdrawalHistoryDTO();
-
                     dto.setPayoutId(p.getId());
                     dto.setAmount(p.getAmount());
                     dto.setStatus(p.getStatus().name());
                     dto.setCreatedAt(p.getCreatedAt());
                     dto.setPaidAt(p.getPaidAt());
-
                     return dto;
                 })
                 .collect(Collectors.toList());

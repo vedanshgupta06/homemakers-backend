@@ -215,4 +215,9 @@ public class UserWalletService {
         txn.setCreatedAt(LocalDateTime.now());
         txnRepository.save(txn);
     }
+    public double getAvailableBalance(Long userId) {
+        return walletRepository.findByUserId(userId)
+                .map(w -> w.getBalance() - w.getReservedBalance())
+                .orElse(0.0);
+    }
 }

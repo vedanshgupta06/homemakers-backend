@@ -13,4 +13,7 @@ public interface UserWalletTransactionRepository extends JpaRepository<UserWalle
     List<UserWalletTransaction> findByUserIdOrderByCreatedAtDesc(Long userId);
 
     boolean existsByBookingIdAndType(Long bookingId, TransactionType type);
+    List<UserWalletTransaction> findTop5ByUserIdAndTypeOrderByCreatedAtDesc(
+            Long userId, TransactionType type
+    );
 }
