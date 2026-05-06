@@ -5,7 +5,8 @@ public enum WorkStatus {
     PRESENT,               // provider marked
     CONFIRMED_PRESENT,     // customer confirmed
     REJECTED,
-    LEAVE
+    LEAVE,
+    ABSENT
 }
 
 
