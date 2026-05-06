@@ -140,4 +140,5 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
           )
     """)
     List<Booking> findActiveBookingsForProvider(@Param("providerId") Long providerId);
+    Optional<Booking> findByIdAndUser_Email(Long id, String email);
 }
