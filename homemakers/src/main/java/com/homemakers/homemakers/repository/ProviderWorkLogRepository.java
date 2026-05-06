@@ -43,6 +43,8 @@ public interface ProviderWorkLogRepository
     List<ProviderWorkLog> findByProviderAndWorkDate(Provider provider, LocalDate workDate);
     List<ProviderWorkLog> findByBookingUserAndWorkDate(User user, LocalDate workDate);
     List<ProviderWorkLog> findByBookingId(Long bookingId);
-
+    boolean existsByBookingAndProviderAndWorkDate(
+            Booking booking, Provider provider, LocalDate workDate
+    );
 
 }
