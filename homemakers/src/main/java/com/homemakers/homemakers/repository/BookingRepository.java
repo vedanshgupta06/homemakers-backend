@@ -1,7 +1,9 @@
 package com.homemakers.homemakers.repository;
 
 import com.homemakers.homemakers.model.*;
+import jakarta.transaction.Transactional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -83,25 +85,13 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
 
     Optional<Booking> findByAvailability_Id(Long availabilityId);
 
-    // ✅ Checks if a provider has an active booking that occupies the given date+time.
-    //
-    // Monthly service logic:
-    // - A booking occupies the provider EVERY DAY for ~30 days at the same daily hours.
-    // - So if provider is booked 12:00–1:00 PM from May 1, they are occupied
-    //   12:00–1:00 PM on May 2, May 10, May 25, etc.
-    //
-    // Two cases:
-    // 1. Work has started (workStartDate set):
-    //    Block workStartDate → workEndDate (or workStartDate+30 if not ended yet)
-    //
-    // 2. Confirmed but not started (workStartDate IS NULL):
-    //    Use availability.date as range start → availability.date + 30 days
-    //    *** estimatedEnd is passed as availability.date + 30 from the service layer ***
-    //
-    // The key fix: estimatedEnd must be computed from booking's availability.date,
-    // NOT from the new slot's date. Service layer now passes:
-    //   existsActiveBookingCoveringDateAndTime(providerId, newDate, newStart, newEnd)
-    // and the query computes the range from b.availability.date internally.
+    Optional<Booking> findByIdAndUser_Email(Long id, String email);
+
+    boolean existsByAvailabilityAndStatusIn(
+            ProviderAvailability availability,
+            List<BookingStatus> statuses
+    );
+
     @Query("""
         SELECT COUNT(b) > 0 FROM Booking b
         WHERE b.provider.id = :providerId
@@ -129,8 +119,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             @Param("endTime") LocalTime endTime
     );
 
-    // ✅ Used by service layer to get all active bookings for this provider
-    // so we can compute estimatedEnd from each booking's availability.date
     @Query("""
         SELECT b FROM Booking b
         WHERE b.provider.id = :providerId
@@ -140,5 +128,58 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
           )
     """)
     List<Booking> findActiveBookingsForProvider(@Param("providerId") Long providerId);
-    Optional<Booking> findByIdAndUser_Email(Long id, String email);
+
+    // =========================================================
+    // ✅ FETCH JOIN queries — eliminates N+1 for scheduler jobs
+    // Each loads booking + all related data in ONE SQL query
+    // Use these in BookingExpiryService instead of findByStatus()
+    // =========================================================
+
+    @Query("""
+        SELECT DISTINCT b FROM Booking b
+        LEFT JOIN FETCH b.availability
+        LEFT JOIN FETCH b.provider p
+        LEFT JOIN FETCH p.user
+        LEFT JOIN FETCH b.user
+        LEFT JOIN FETCH b.services
+        WHERE b.status = :status
+    """)
+    List<Booking> findByStatusWithDetails(@Param("status") BookingStatus status);
+
+    @Query("""
+        SELECT DISTINCT b FROM Booking b
+        LEFT JOIN FETCH b.availability
+        LEFT JOIN FETCH b.provider p
+        LEFT JOIN FETCH p.user
+        LEFT JOIN FETCH b.user
+        LEFT JOIN FETCH b.services
+        WHERE b.status = :status AND b.createdAt < :before
+    """)
+    List<Booking> findByStatusAndCreatedAtBeforeWithDetails(
+            @Param("status") BookingStatus status,
+            @Param("before") LocalDateTime before
+    );
+
+    @Query("""
+        SELECT DISTINCT b FROM Booking b
+        LEFT JOIN FETCH b.availability
+        LEFT JOIN FETCH b.provider p
+        LEFT JOIN FETCH p.user
+        LEFT JOIN FETCH b.user
+        LEFT JOIN FETCH b.services
+        WHERE b.status = :status AND b.paymentStatus = :paymentStatus
+    """)
+    List<Booking> findByStatusAndPaymentStatusWithDetails(
+            @Param("status") BookingStatus status,
+            @Param("paymentStatus") PaymentStatus paymentStatus
+    );
+
+    // =========================================================
+    // ✅ Nullify availability FK before deleting a slot
+    // Used in ProviderAvailabilityController.deleteSlot()
+    // =========================================================
+    @Modifying
+    @Transactional
+    @Query("UPDATE Booking b SET b.availability = null WHERE b.availability.id = :slotId")
+    void nullifyAvailability(@Param("slotId") Long slotId);
 }
