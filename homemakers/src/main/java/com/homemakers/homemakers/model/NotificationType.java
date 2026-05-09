@@ -5,5 +5,6 @@ public enum NotificationType {
     REJECTED,
     BOOKING,
     PAYOUT,
-    GENERAL
+    GENERAL,
+    REMINDER
 }

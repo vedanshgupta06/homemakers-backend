@@ -128,4 +128,12 @@ public class UserController {
         long count = userService.getUnreadNotificationCount(auth.getName());
         return Map.of("count", count);
     }
+    @PostMapping("/refresh")
+    public ResponseEntity<LoginResponse> refresh(@RequestBody Map<String, String> body) {
+        String refreshToken = body.get("refreshToken");
+        if (refreshToken == null || refreshToken.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        return ResponseEntity.ok(userService.refreshAccessToken(refreshToken));
+    }
 }
