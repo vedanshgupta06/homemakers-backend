@@ -2,13 +2,16 @@ package com.homemakers.homemakers.service;
 
 import com.homemakers.homemakers.model.*;
 import com.homemakers.homemakers.repository.*;
+import jakarta.transaction.Transactional;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class BookingExpiryService {
@@ -43,10 +46,9 @@ public class BookingExpiryService {
 
     // =========================================================
     // Job 1 — Cancel/Penalty runner (every 15 minutes)
-    // ✅ FIXED: Now checks full DateTime (date + booking start
-    //    time) so a 10 AM slot is caught at 10 AM, not next day
     // =========================================================
     @Scheduled(fixedRate = 15 * 60 * 1000)
+    @Transactional
     public void expireOldBookings() {
 
         // ── Cancel PENDING bookings older than 2 days ──
@@ -71,7 +73,6 @@ public class BookingExpiryService {
             LocalDate scheduledDate = booking.getAvailability().getDate();
             LocalTime scheduledTime = booking.getBookingStartTime();
 
-            // ✅ Use full DateTime — fall back to midnight if no time set
             LocalDateTime scheduledDateTime = (scheduledTime != null)
                     ? LocalDateTime.of(scheduledDate, scheduledTime)
                     : LocalDateTime.of(scheduledDate, LocalTime.MIDNIGHT);
@@ -126,18 +127,9 @@ public class BookingExpiryService {
 
     // =========================================================
     // Job 2 — Time-aware reminder sender (every 15 minutes)
-    // ✅ Sends reminders relative to actual booking start time:
-    //    - 60–75 min before  → "Start soon" reminder
-    //    - 15–30 min before  → Final warning
-    //
-    // Example: slot is 6 May 10:00 AM
-    //   → Reminder fires between 8:45–9:00 AM
-    //   → Final warning fires between 9:30–9:45 AM
-    //
-    // This correctly handles late accepts too — if provider
-    // accepts at 9:50 AM for a 10:00 AM slot, they immediately
-    // get the final warning on next scheduler tick.
     // =========================================================
+    private final Set<String> sentReminders = new HashSet<>();
+    @Transactional
     @Scheduled(fixedRate = 15 * 60 * 1000)
     public void sendTimeAwareReminders() {
 
@@ -147,7 +139,6 @@ public class BookingExpiryService {
 
         for (Booking booking : confirmed) {
 
-            // Only notify for PAID bookings
             if (booking.getPaymentStatus() != PaymentStatus.PAID) continue;
 
             LocalDate scheduledDate = booking.getAvailability().getDate();
@@ -157,33 +148,30 @@ public class BookingExpiryService {
 
             LocalDateTime scheduledDateTime = LocalDateTime.of(scheduledDate, scheduledTime);
 
-            // Skip if already past
             if (scheduledDateTime.isBefore(now)) continue;
 
             long minutesUntilStart = java.time.Duration.between(now, scheduledDateTime).toMinutes();
 
-            String displayDateTime = scheduledDate.toString() + " at " + formatTime(scheduledTime);
+            String displayDateTime = scheduledDate + " at " + formatTime(scheduledTime);
 
-            // ── 1-hour reminder: 60–75 minutes before start ──
-            if (minutesUntilStart <= 75 && minutesUntilStart > 45) {
+            // 2-hour reminder: 105–135 minutes before start
+            String morningKey = "morning-" + booking.getId() + "-" + scheduledDate;
+            if (minutesUntilStart <= 135 && minutesUntilStart > 105
+                    && !sentReminders.contains(morningKey)) {
                 notificationService.startDateReminder(
-                        booking.getProvider(),
-                        booking.getId(),
-                        displayDateTime
-                );
-                System.out.println("🔔 1-hour reminder sent for booking #" + booking.getId()
-                        + " (starts at " + scheduledDateTime + ")");
+                        booking.getProvider(), booking.getId(), displayDateTime);
+                sentReminders.add(morningKey);
+                System.out.println("🔔 2-hour reminder sent for booking #" + booking.getId());
             }
 
-            // ── Final warning: 15–30 minutes before start ──
-            if (minutesUntilStart <= 30 && minutesUntilStart > 0) {
+            // Final warning: 15–30 minutes before start
+            String finalKey = "final-" + booking.getId() + "-" + scheduledDate;
+            if (minutesUntilStart <= 30 && minutesUntilStart > 15
+                    && !sentReminders.contains(finalKey)) {
                 notificationService.startDateFinalWarning(
-                        booking.getProvider(),
-                        booking.getId(),
-                        displayDateTime
-                );
-                System.out.println("🚨 Final warning sent for booking #" + booking.getId()
-                        + " (starts at " + scheduledDateTime + ")");
+                        booking.getProvider(), booking.getId(), displayDateTime);
+                sentReminders.add(finalKey);
+                System.out.println("🚨 Final warning sent for booking #" + booking.getId());
             }
         }
     }
@@ -289,13 +277,72 @@ public class BookingExpiryService {
         // ── Step 5: Cancel the booking ──
         booking.setStatus(BookingStatus.CANCELLED);
 
-        // ── Step 6: Free the provider slot ──
-        ProviderAvailability slot = booking.getAvailability();
-        slot.setActive(true);
-        availabilityRepository.save(slot);
+        // ── Step 6: Reactivate anchor slot + ALL future locked slots ──
+        // ✅ FIXED: Previously only reactivated the anchor slot (start date).
+        // Now also reactivates all future slots that were locked for the
+        // 30-day range when the booking was accepted.
+        reactivateAllLockedSlots(booking);
 
         bookingRepository.save(booking);
         System.out.println("✅ Booking #" + booking.getId() + " cancelled successfully");
+    }
+
+    // =========================================================
+    // ✅ NEW — Reactivate anchor slot + all future locked slots
+    // Called when booking is cancelled by the scheduler.
+    // Mirrors the same logic in BookingService.reactivateSlotForBooking()
+    // =========================================================
+    private void reactivateAllLockedSlots(Booking booking) {
+        if (booking.getAvailability() == null) return;
+
+        Provider provider   = booking.getProvider();
+        LocalDate startDate = booking.getAvailability().getDate();
+        LocalTime bookStart = booking.getBookingStartTime();
+        LocalTime bookEnd   = booking.getBookingEndTime();
+
+        // Estimate 30-day range (no workEndDate since booking was cancelled, not completed)
+        LocalDate endDate = startDate.plusDays(30);
+
+        // ── Reactivate the anchor slot itself ──
+        ProviderAvailability anchorSlot = booking.getAvailability();
+        if (!anchorSlot.isActive()) {
+            anchorSlot.setActive(true);
+            availabilityRepository.save(anchorSlot);
+            System.out.println("🔓 Reactivated anchor slot #" + anchorSlot.getId()
+                    + " on " + anchorSlot.getDate());
+        }
+
+        if (bookStart == null || bookEnd == null) return;
+
+        // ── Reactivate all future slots locked for this booking's time window ──
+        List<ProviderAvailability> allSlots = availabilityRepository.findByProvider(provider);
+
+        for (ProviderAvailability slot : allSlots) {
+
+            // Only slots after the anchor date within 30-day range
+            if (slot.getDate().isBefore(startDate.plusDays(1))) continue;
+            if (slot.getDate().isAfter(endDate)) continue;
+
+            // Only inactive slots
+            if (slot.isActive()) continue;
+
+            // Only slots overlapping the booking time window
+            boolean overlaps = slot.getStartTime().isBefore(bookEnd)
+                    && slot.getEndTime().isAfter(bookStart);
+
+            if (overlaps) {
+                // Safety check: don't reactivate if another booking uses this slot
+                boolean hasOtherBooking = bookingRepository.existsByAvailability(slot);
+
+                if (!hasOtherBooking) {
+                    slot.setActive(true);
+                    availabilityRepository.save(slot);
+                    System.out.println("🔓 Reactivated future slot #" + slot.getId()
+                            + " on " + slot.getDate()
+                            + " " + slot.getStartTime() + "-" + slot.getEndTime());
+                }
+            }
+        }
     }
 
     // =========================================================
@@ -303,7 +350,6 @@ public class BookingExpiryService {
     // =========================================================
     private void applyProviderPenalty(Booking booking) {
 
-        // ✅ No penalty if user never paid — not the provider's fault
         if (booking.getPaymentStatus() != PaymentStatus.PAID) {
             System.out.println("⏭ Skipping penalty for booking #" + booking.getId() + " — not paid");
             return;
@@ -339,7 +385,6 @@ public class BookingExpiryService {
 
         booking.setPenaltyApplied(PENALTY_AMOUNT);
 
-        // ✅ Notify provider about cancellation + penalty
         notificationService.bookingAutoCancelledWithPenalty(
                 provider,
                 booking.getId(),
