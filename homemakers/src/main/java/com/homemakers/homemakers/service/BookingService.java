@@ -64,6 +64,9 @@ public class BookingService {
     @PersistenceContext
     private EntityManager entityManager;
 
+    private static final int BUFFER_MINUTES  = 15;
+    private static final int SERVICE_DAYS    = 30;
+
     // =========================================================
     // CREATE BOOKING
     // =========================================================
@@ -108,32 +111,34 @@ public class BookingService {
             }
         }
 
-        LocalTime requestStart = slot.getStartTime();
-        LocalTime requestEnd   = requestStart.plusMinutes(requiredMinutes);
+        LocalTime requestStart      = slot.getStartTime();
+        LocalTime requestEnd        = requestStart.plusMinutes(requiredMinutes);
+        LocalTime bufferedEnd       = requestEnd.plusMinutes(BUFFER_MINUTES);
+        LocalTime originalSlotStart = slot.getStartTime();
+        LocalTime originalSlotEnd   = slot.getEndTime();
+        LocalDate slotDate          = slot.getDate();
+        LocalDate workEndDate       = slotDate.plusDays(SERVICE_DAYS);
 
         if (requestEnd.isAfter(slot.getEndTime())) {
             throw new RuntimeException("Requested time outside provider slot");
         }
 
-        final int BUFFER_MINUTES = 15;
-
-        LocalTime originalSlotStart = slot.getStartTime();
-        LocalTime originalSlotEnd   = slot.getEndTime();
-        LocalDate slotDate          = slot.getDate();
-
         availabilityRepository.delete(slot);
         availabilityRepository.flush();
 
-        // 1. Booked slot — inactive, exact booking window
+        // 1. Anchor booked slot — inactive, exact booking window, range set
         ProviderAvailability bookedSlot = new ProviderAvailability();
         bookedSlot.setProvider(provider);
         bookedSlot.setDate(slotDate);
         bookedSlot.setStartTime(requestStart);
         bookedSlot.setEndTime(requestEnd);
         bookedSlot.setActive(false);
+        bookedSlot.setBookingWorkStart(slotDate);
+        bookedSlot.setBookingWorkEnd(workEndDate);
+        bookedSlot.setBookingCustomerName(user.getName());
         ProviderAvailability savedBookedSlot = availabilityRepository.save(bookedSlot);
 
-        // 2. Before-slot — active, only if booking starts after slot start
+        // 2. Before-slot — free time before booking starts (same day only)
         if (requestStart.isAfter(originalSlotStart)) {
             ProviderAvailability beforeSlot = new ProviderAvailability();
             beforeSlot.setProvider(provider);
@@ -144,8 +149,7 @@ public class BookingService {
             availabilityRepository.save(beforeSlot);
         }
 
-        // 3. After-slot — active, only if time remains after booking + buffer
-        LocalTime bufferedEnd = requestEnd.plusMinutes(BUFFER_MINUTES);
+        // 3. After-slot (split remainder) — free time after booking + buffer (same day only)
         if (bufferedEnd.isBefore(originalSlotEnd)) {
             ProviderAvailability afterSlot = new ProviderAvailability();
             afterSlot.setProvider(provider);
@@ -244,7 +248,6 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.CONFIRMED);
 
-        // Only deduct wallet if user explicitly consented
         if (booking.getWalletConsentStatus() == WalletConsentStatus.ACCEPTED
                 && booking.getWalletUsed() != null
                 && booking.getWalletUsed() > 0) {
@@ -274,9 +277,8 @@ public class BookingService {
             booking.setPaymentStatus(PaymentStatus.PAYMENT_REQUIRED);
         }
 
-        // ✅ Lock all future slots that overlap with this booking's time window
-        // for the next 30 days (monthly service duration)
-        lockOverlappingFutureSlots(booking);
+        // ✅ Split all future overlapping slots for the 30-day window
+        splitAndLockOverlappingFutureSlots(booking);
 
         return bookingRepository.save(booking);
     }
@@ -345,7 +347,7 @@ public class BookingService {
         LocalTime bookingEnd    = booking.getBookingEndTime();
         LocalTime originalStart = booking.getOriginalSlotStart();
         LocalTime originalEnd   = booking.getOriginalSlotEnd();
-        LocalTime bufferedEnd   = bookingEnd.plusMinutes(15);
+        LocalTime bufferedEnd   = bookingEnd.plusMinutes(BUFFER_MINUTES);
 
         entityManager.createNativeQuery(
                 "UPDATE bookings SET availability_id = NULL WHERE id = :bookingId"
@@ -463,8 +465,8 @@ public class BookingService {
             }
         }
 
-        // ✅ Reactivate anchor slot + unlock all future locked slots
-        reactivateSlotForBooking(booking);
+        // ✅ Unlock and restore all future split slots for this booking
+        restoreAndUnlockFutureSlots(booking);
 
         return booking;
     }
@@ -484,113 +486,203 @@ public class BookingService {
         providerSettlementService.finalizeSettlement(booking);
         bookingRepository.save(booking);
 
-        // ✅ Reactivate anchor slot + unlock all future locked slots
-        reactivateSlotForBooking(booking);
+        // ✅ Unlock and restore all future split slots for this booking
+        restoreAndUnlockFutureSlots(booking);
 
         return booking;
     }
 
     // =========================================================
-    // PRIVATE — Lock future overlapping slots on booking accept
-    // When a booking is confirmed, find all of the provider's
-    // ACTIVE slots in the next 30 days that overlap with the
-    // booking time window and mark them inactive.
-    // This prevents double-bookings for monthly services.
+    // PRIVATE — Split and lock overlapping future slots on accept
+    //
+    // When a booking is confirmed, for every provider slot in the
+    // next 30 days that overlaps the booking time window:
+    //
+    //   Original slot: [slotStart -------- slotEnd]
+    //   Booking time:        [bookStart -- bookEnd]
+    //
+    // Result:
+    //   Before part:  [slotStart -- bookStart]  active=true  (if exists)
+    //   Locked part:  [bookStart -- bookEnd]    active=false, range set
+    //   After part:   [bookEnd+buffer -- slotEnd] active=true (if exists)
+    //
+    // This mirrors exactly what createBooking does for the anchor date,
+    // applied to every existing slot in the 30-day window.
     // =========================================================
-    private void lockOverlappingFutureSlots(Booking booking) {
+    private void splitAndLockOverlappingFutureSlots(Booking booking) {
         Provider provider   = booking.getProvider();
-        LocalDate startDate = booking.getAvailability().getDate();
-        LocalDate endDate   = startDate.plusDays(30);
-        LocalTime bookStart = booking.getBookingStartTime();
-        LocalTime bookEnd   = booking.getBookingEndTime();
+        LocalDate anchorDate = booking.getAvailability().getDate();
+        LocalDate endDate    = anchorDate.plusDays(SERVICE_DAYS);
+        LocalTime bookStart  = booking.getBookingStartTime();
+        LocalTime bookEnd    = booking.getBookingEndTime();
+        LocalTime bufferedEnd = bookEnd.plusMinutes(BUFFER_MINUTES);
+        String customerName  = booking.getUser().getName();
 
         if (bookStart == null || bookEnd == null) return;
 
+        // Fetch all provider slots.
+        // We process ALL slots in the 30-day window EXCEPT the anchor date itself
+        // (which was already handled in createBooking).
+        // This includes slots BEFORE the anchor (e.g. May 1 when anchor is May 2)
+        // because those were added by the provider and must also be split+locked.
         List<ProviderAvailability> allSlots = availabilityRepository.findByProvider(provider);
 
-        for (ProviderAvailability slot : allSlots) {
+        for (ProviderAvailability existingSlot : allSlots) {
 
-            // Only future slots within the 30-day window (skip anchor date)
-            if (slot.getDate().isBefore(startDate.plusDays(1))) continue;
-            if (slot.getDate().isAfter(endDate)) continue;
+            // Skip the anchor date — already fully handled in createBooking
+            if (existingSlot.getDate().isEqual(anchorDate)) continue;
 
-            // Only active slots
-            if (!slot.isActive()) continue;
+            // Only within the 30-day service window (before OR after anchor)
+            if (existingSlot.getDate().isAfter(endDate)) continue;
 
-            // Overlap: slot starts before bookEnd AND slot ends after bookStart
-            boolean overlaps = slot.getStartTime().isBefore(bookEnd)
-                    && slot.getEndTime().isAfter(bookStart);
+            // Only active (free) slots — skip already-booked ones
+            if (!existingSlot.isActive()) continue;
 
-            if (overlaps) {
-                slot.setActive(false);
-                availabilityRepository.save(slot);
-                System.out.println("🔒 Locked slot #" + slot.getId()
-                        + " on " + slot.getDate()
-                        + " " + slot.getStartTime() + "-" + slot.getEndTime()
-                        + " due to booking #" + booking.getId());
+            LocalTime slotStart = existingSlot.getStartTime();
+            LocalTime slotEnd   = existingSlot.getEndTime();
+
+            // Check overlap: slot must overlap with booking time window
+            boolean overlaps = slotStart.isBefore(bookEnd) && slotEnd.isAfter(bookStart);
+            if (!overlaps) continue;
+
+            // Delete the original slot — we'll replace it with up to 3 parts
+            availabilityRepository.delete(existingSlot);
+            availabilityRepository.flush();
+
+            LocalDate slotDate = existingSlot.getDate();
+
+            // Part 1 — Before portion: free time before booking starts
+            // e.g. slot is 8AM–1PM, booking is 9–11AM → save 8AM–9AM as free
+            if (slotStart.isBefore(bookStart)) {
+                ProviderAvailability beforePart = new ProviderAvailability();
+                beforePart.setProvider(provider);
+                beforePart.setDate(slotDate);
+                beforePart.setStartTime(slotStart);
+                beforePart.setEndTime(bookStart);
+                beforePart.setActive(true);
+                availabilityRepository.save(beforePart);
             }
+
+            // Part 2 — Locked portion: the booking window, marked inactive with range
+            // Clamped to the actual slot boundaries in case booking extends beyond slot
+            LocalTime lockedStart = bookStart.isBefore(slotStart) ? slotStart : bookStart;
+            LocalTime lockedEnd   = bookEnd.isAfter(slotEnd)      ? slotEnd   : bookEnd;
+
+            ProviderAvailability lockedPart = new ProviderAvailability();
+            lockedPart.setProvider(provider);
+            lockedPart.setDate(slotDate);
+            lockedPart.setStartTime(lockedStart);
+            lockedPart.setEndTime(lockedEnd);
+            lockedPart.setActive(false);
+            lockedPart.setBookingWorkStart(anchorDate);
+            lockedPart.setBookingWorkEnd(endDate);
+            lockedPart.setBookingCustomerName(customerName);
+            availabilityRepository.save(lockedPart);
+
+            // Part 3 — After portion (split remainder): free time after booking + buffer
+            // e.g. slot is 9AM–1PM, booking is 9–11AM → save 11:15AM–1PM as free
+            if (bufferedEnd.isBefore(slotEnd)) {
+                ProviderAvailability afterPart = new ProviderAvailability();
+                afterPart.setProvider(provider);
+                afterPart.setDate(slotDate);
+                afterPart.setStartTime(bufferedEnd);
+                afterPart.setEndTime(slotEnd);
+                afterPart.setActive(true);
+                availabilityRepository.save(afterPart);
+            }
+
+            System.out.println("✂️ Split slot on " + slotDate
+                    + " [" + slotStart + "-" + slotEnd + "]"
+                    + " → locked [" + lockedStart + "-" + lockedEnd + "]"
+                    + (slotStart.isBefore(bookStart) ? " + before [" + slotStart + "-" + bookStart + "]" : "")
+                    + (bufferedEnd.isBefore(slotEnd) ? " + after [" + bufferedEnd + "-" + slotEnd + "]" : "")
+                    + " for booking #" + booking.getId());
         }
     }
 
     // =========================================================
-    // PRIVATE — Reactivate anchor slot + all future locked slots
-    // When booking ends for any reason (completed, terminated,
-    // or cancelled by scheduler), reactivate all slots that were
-    // locked for the 30-day range.
+    // PRIVATE — Restore and unlock all future split slots
+    //
+    // When booking ends (completed, terminated, or cancelled),
+    // find all inactive slots in the 30-day range that belong
+    // to this booking and:
+    //   1. Clear their booking range fields (bookingWorkStart/End, customerName)
+    //   2. Mark them active=true so provider can re-use or re-add
+    //
+    // The provider must then manually add new slots for those dates.
+    // We do NOT auto-merge split parts back — provider decides fresh.
+    //
+    // Safety: skip slots that have another active booking attached.
     // =========================================================
-    private void reactivateSlotForBooking(Booking booking) {
+    private void restoreAndUnlockFutureSlots(Booking booking) {
         if (booking.getAvailability() == null) return;
 
-        Provider provider   = booking.getProvider();
-        LocalDate startDate = booking.getAvailability().getDate();
-        LocalTime bookStart = booking.getBookingStartTime();
-        LocalTime bookEnd   = booking.getBookingEndTime();
+        Provider provider    = booking.getProvider();
+        LocalDate anchorDate = booking.getAvailability().getDate();
+        LocalTime bookStart  = booking.getBookingStartTime();
+        LocalTime bookEnd    = booking.getBookingEndTime();
 
-        // Use actual work end date if available, otherwise estimate 30 days
+        // Use actual work end if available (termination), else full 30-day window
         LocalDate endDate = booking.getWorkEndDate() != null
                 ? booking.getWorkEndDate()
-                : startDate.plusDays(30);
+                : anchorDate.plusDays(SERVICE_DAYS);
 
-        // Reactivate the anchor slot itself
+        // 1. Reactivate the anchor slot itself and clear its range
         ProviderAvailability anchorSlot = availabilityRepository
                 .findById(booking.getAvailability().getId())
                 .orElse(null);
 
         if (anchorSlot != null && !anchorSlot.isActive()) {
             anchorSlot.setActive(true);
+            anchorSlot.setBookingWorkStart(null);
+            anchorSlot.setBookingWorkEnd(null);
+            anchorSlot.setBookingCustomerName(null);
             availabilityRepository.save(anchorSlot);
             System.out.println("🔓 Reactivated anchor slot #" + anchorSlot.getId());
         }
 
         if (bookStart == null || bookEnd == null) return;
 
+        // Find all locked slots in the booking's range belonging to this booking.
+        // Includes slots BEFORE the anchor (e.g. May 1) since those were also
+        // split+locked when the booking was accepted.
         List<ProviderAvailability> allSlots = availabilityRepository.findByProvider(provider);
 
         for (ProviderAvailability slot : allSlots) {
 
-            // Only slots in the booking's date range (skip anchor date)
-            if (slot.getDate().isBefore(startDate.plusDays(1))) continue;
+            // Skip the anchor slot — already handled above
+            if (slot.getId().equals(booking.getAvailability().getId())) continue;
+
+            // Only within the booking's full date range (before OR after anchor)
             if (slot.getDate().isAfter(endDate)) continue;
 
-            // Only currently inactive slots
+            // Only inactive slots
             if (slot.isActive()) continue;
 
-            // Only slots overlapping the booking time window
+            // Only slots whose range matches this booking's anchor date
+            // This ensures we don't accidentally unlock slots from a different booking
+            if (!anchorDate.equals(slot.getBookingWorkStart())) continue;
+
+            // Overlap check: slot time must overlap with booking time window
             boolean overlaps = slot.getStartTime().isBefore(bookEnd)
                     && slot.getEndTime().isAfter(bookStart);
+            if (!overlaps) continue;
 
-            if (overlaps) {
-                // Safety check: don't reactivate if another booking is using this slot
-                boolean hasOtherBooking = bookingRepository.existsByAvailability(slot);
+            // Safety: skip if another booking is actively using this slot
+            boolean hasOtherBooking = bookingRepository.existsByAvailability(slot);
+            if (hasOtherBooking) continue;
 
-                if (!hasOtherBooking) {
-                    slot.setActive(true);
-                    availabilityRepository.save(slot);
-                    System.out.println("🔓 Reactivated slot #" + slot.getId()
-                            + " on " + slot.getDate()
-                            + " " + slot.getStartTime() + "-" + slot.getEndTime());
-                }
-            }
+            // Clear booking range and reactivate — provider adds fresh slots manually
+            slot.setActive(true);
+            slot.setBookingWorkStart(null);
+            slot.setBookingWorkEnd(null);
+            slot.setBookingCustomerName(null);
+            availabilityRepository.save(slot);
+
+            System.out.println("🔓 Unlocked slot #" + slot.getId()
+                    + " on " + slot.getDate()
+                    + " [" + slot.getStartTime() + "-" + slot.getEndTime() + "]"
+                    + " for booking #" + booking.getId());
         }
     }
 
@@ -703,9 +795,9 @@ public class BookingService {
     public void autoCompleteBooking(Booking booking) {
         if (booking.getStatus() == BookingStatus.SERVICE_IN_PROGRESS) {
             if (booking.getWorkStartDate() != null &&
-                    booking.getWorkStartDate().plusDays(30).isBefore(LocalDate.now())) {
+                    booking.getWorkStartDate().plusDays(SERVICE_DAYS).isBefore(LocalDate.now())) {
                 booking.setStatus(BookingStatus.COMPLETED);
-                booking.setWorkEndDate(booking.getWorkStartDate().plusDays(30));
+                booking.setWorkEndDate(booking.getWorkStartDate().plusDays(SERVICE_DAYS));
             }
         }
     }
