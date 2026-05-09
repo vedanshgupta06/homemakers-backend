@@ -30,6 +30,7 @@ public class ProviderAvailability {
     @JoinColumn(name = "provider_id")
     @JsonIgnoreProperties({"availabilities", "hibernateLazyInitializer", "handler"})
     private Provider provider;
+
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
     private LocalDate date;
 
@@ -37,9 +38,29 @@ public class ProviderAvailability {
 
     private LocalTime endTime;
 
-
     @Column(name = "active")
     private Boolean active;
+
+    // =============================
+    // BOOKING RANGE FIELDS
+    // Set when a slot is locked by an active booking.
+    // bookingWorkStart = anchor date (date booking was originally placed)
+    // bookingWorkEnd   = anchor date + 30 days (or actual termination date)
+    // bookingCustomerName = name of the customer who booked
+    // All three are null for free (active) slots and cleared on cancellation/termination.
+    // =============================
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
+    @Column(name = "booking_work_start")
+    private LocalDate bookingWorkStart;
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
+    @Column(name = "booking_work_end")
+    private LocalDate bookingWorkEnd;
+
+    @Column(name = "booking_customer_name")
+    private String bookingCustomerName;
+
     // =============================
     // VALIDATION
     // =============================
@@ -47,8 +68,7 @@ public class ProviderAvailability {
     @PrePersist
     @PreUpdate
     public void validateTimes() {
-
-        if(startTime.isAfter(endTime) || startTime.equals(endTime)){
+        if (startTime.isAfter(endTime) || startTime.equals(endTime)) {
             throw new IllegalArgumentException(
                     "Slot start time must be before end time"
             );
@@ -109,5 +129,29 @@ public class ProviderAvailability {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public LocalDate getBookingWorkStart() {
+        return bookingWorkStart;
+    }
+
+    public void setBookingWorkStart(LocalDate bookingWorkStart) {
+        this.bookingWorkStart = bookingWorkStart;
+    }
+
+    public LocalDate getBookingWorkEnd() {
+        return bookingWorkEnd;
+    }
+
+    public void setBookingWorkEnd(LocalDate bookingWorkEnd) {
+        this.bookingWorkEnd = bookingWorkEnd;
+    }
+
+    public String getBookingCustomerName() {
+        return bookingCustomerName;
+    }
+
+    public void setBookingCustomerName(String bookingCustomerName) {
+        this.bookingCustomerName = bookingCustomerName;
     }
 }
