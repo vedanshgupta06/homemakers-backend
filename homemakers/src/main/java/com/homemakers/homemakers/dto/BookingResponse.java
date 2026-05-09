@@ -5,91 +5,118 @@ import com.homemakers.homemakers.model.ServiceType;
 
 import java.util.List;
 
+/**
+ * DTO returned by the provider bookings endpoint and the single-booking endpoint.
+ *
+ * Uses a private all-args constructor + public static {@link Builder} so callers
+ * never have to count positional arguments — adding a new field is a one-liner
+ * and never breaks existing call sites.
+ */
 public class BookingResponse {
 
-    private Long bookingId;
-    private BookingStatus status;
+    private final Long              bookingId;
+    private final BookingStatus     status;
 
-    private String customerName;
-    private String customerPhone;    // ✅ null for PENDING/REJECTED/CANCELLED, real number after CONFIRMED
-    private String serviceAddress;   // ✅ from user.getAddress()
-    private String customerNote;     // ✅ from booking.getCustomerNote()
+    private final String            customerName;
+    private final String            customerPhone;      // null until CONFIRMED or beyond
+    private final String            serviceAddress;
+    private final String            customerNote;
+    private final String            terminationReason;  // ✅ populated only when TERMINATED
 
-    private String serviceDate;
-    private String startTime;
-    private String endTime;
+    private final String            serviceDate;
+    private final String            startTime;
+    private final String            endTime;
 
-    private String paymentStatus;
-    private Double totalAmount;      // ✅ from booking.getFinalPayableAmount()
+    private final String            paymentStatus;
+    private final Double            totalAmount;
 
-    private int totalDays;
-    private int chargeableDays;
-    private int holidays;
+    private final int               totalDays;
+    private final int               chargeableDays;
+    private final int               holidays;
 
-    private List<ServiceType> services;
+    private final List<ServiceType> services;
 
-    public BookingResponse(Long bookingId,
-                           BookingStatus status,
-                           String customerName,
-                           String customerPhone,
-                           String serviceAddress,
-                           String customerNote,
-                           String serviceDate,
-                           List<ServiceType> services,
-                           String startTime,
-                           String endTime,
-                           String paymentStatus,
-                           Double totalAmount,
-                           int totalDays,
-                           int chargeableDays,
-                           int holidays) {
+    // ── Private constructor (use Builder) ─────────────────────────────────────
 
-        this.bookingId = bookingId;
-        this.status = status;
-        this.customerName = customerName;
-        this.customerPhone = customerPhone;
-        this.serviceAddress = serviceAddress;
-        this.customerNote = customerNote;
-        this.serviceDate = serviceDate;
-        this.services = services;
-        this.startTime = startTime;
-        this.endTime = endTime;
-        this.paymentStatus = paymentStatus;
-        this.totalAmount = totalAmount;
-        this.totalDays = totalDays;
-        this.chargeableDays = chargeableDays;
-        this.holidays = holidays;
+    private BookingResponse(Builder b) {
+        this.bookingId         = b.bookingId;
+        this.status            = b.status;
+        this.customerName      = b.customerName;
+        this.customerPhone     = b.customerPhone;
+        this.serviceAddress    = b.serviceAddress;
+        this.customerNote      = b.customerNote;
+        this.terminationReason = b.terminationReason;
+        this.serviceDate       = b.serviceDate;
+        this.startTime         = b.startTime;
+        this.endTime           = b.endTime;
+        this.paymentStatus     = b.paymentStatus;
+        this.totalAmount       = b.totalAmount;
+        this.totalDays         = b.totalDays;
+        this.chargeableDays    = b.chargeableDays;
+        this.holidays          = b.holidays;
+        this.services          = b.services;
     }
 
-    // ── Getters ──────────────────────────────────────────────
+    // ── Builder ───────────────────────────────────────────────────────────────
 
-    public Long getBookingId() { return bookingId; }
-    public BookingStatus getStatus() { return status; }
+    public static Builder builder() { return new Builder(); }
 
-    public String getCustomerName() { return customerName; }
-    public String getCustomerPhone() { return customerPhone; }
-    public String getServiceAddress() { return serviceAddress; }
-    public String getCustomerNote() { return customerNote; }
+    public static final class Builder {
+        private Long              bookingId;
+        private BookingStatus     status;
+        private String            customerName;
+        private String            customerPhone;
+        private String            serviceAddress;
+        private String            customerNote;
+        private String            terminationReason;
+        private String            serviceDate;
+        private String            startTime;
+        private String            endTime;
+        private String            paymentStatus;
+        private Double            totalAmount;
+        private int               totalDays;
+        private int               chargeableDays;
+        private int               holidays;
+        private List<ServiceType> services;
 
-    public String getServiceDate() { return serviceDate; }
-    public String getStartTime() { return startTime; }
-    public String getEndTime() { return endTime; }
+        private Builder() {}
 
-    public String getPaymentStatus() { return paymentStatus; }
-    public Double getTotalAmount() { return totalAmount; }
+        public Builder bookingId(Long val)              { bookingId         = val; return this; }
+        public Builder status(BookingStatus val)        { status            = val; return this; }
+        public Builder customerName(String val)         { customerName      = val; return this; }
+        public Builder customerPhone(String val)        { customerPhone     = val; return this; }
+        public Builder serviceAddress(String val)       { serviceAddress    = val; return this; }
+        public Builder customerNote(String val)         { customerNote      = val; return this; }
+        public Builder terminationReason(String val)    { terminationReason = val; return this; }
+        public Builder serviceDate(String val)          { serviceDate       = val; return this; }
+        public Builder startTime(String val)            { startTime         = val; return this; }
+        public Builder endTime(String val)              { endTime           = val; return this; }
+        public Builder paymentStatus(String val)        { paymentStatus     = val; return this; }
+        public Builder totalAmount(Double val)          { totalAmount       = val; return this; }
+        public Builder totalDays(int val)               { totalDays         = val; return this; }
+        public Builder chargeableDays(int val)          { chargeableDays    = val; return this; }
+        public Builder holidays(int val)                { holidays          = val; return this; }
+        public Builder services(List<ServiceType> val)  { services          = val; return this; }
 
-    public int getTotalDays() { return totalDays; }
-    public int getChargeableDays() { return chargeableDays; }
-    public int getHolidays() { return holidays; }
+        public BookingResponse build()                  { return new BookingResponse(this); }
+    }
 
-    public List<ServiceType> getServices() { return services; }
+    // ── Getters ───────────────────────────────────────────────────────────────
 
-    // ── Setters ──────────────────────────────────────────────
-
-    public void setServices(List<ServiceType> services) { this.services = services; }
-    public void setPaymentStatus(String paymentStatus) { this.paymentStatus = paymentStatus; }
-    public void setCustomerPhone(String customerPhone) { this.customerPhone = customerPhone; }
-    public void setServiceAddress(String serviceAddress) { this.serviceAddress = serviceAddress; }
-    public void setCustomerNote(String customerNote) { this.customerNote = customerNote; }
-    public void setTotalAmount(Double totalAmount) { this.totalAmount = totalAmount; }
+    public Long              getBookingId()         { return bookingId;         }
+    public BookingStatus     getStatus()            { return status;            }
+    public String            getCustomerName()      { return customerName;      }
+    public String            getCustomerPhone()     { return customerPhone;     }
+    public String            getServiceAddress()    { return serviceAddress;    }
+    public String            getCustomerNote()      { return customerNote;      }
+    public String            getTerminationReason() { return terminationReason; }
+    public String            getServiceDate()       { return serviceDate;       }
+    public String            getStartTime()         { return startTime;         }
+    public String            getEndTime()           { return endTime;           }
+    public String            getPaymentStatus()     { return paymentStatus;     }
+    public Double            getTotalAmount()       { return totalAmount;       }
+    public int               getTotalDays()         { return totalDays;         }
+    public int               getChargeableDays()    { return chargeableDays;    }
+    public int               getHolidays()          { return holidays;          }
+    public List<ServiceType> getServices()          { return services;          }
 }
