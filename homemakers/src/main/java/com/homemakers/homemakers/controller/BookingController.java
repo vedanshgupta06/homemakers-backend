@@ -5,13 +5,15 @@ import com.homemakers.homemakers.model.*;
 import com.homemakers.homemakers.repository.BookingRepository;
 import com.homemakers.homemakers.repository.ReviewRepository;
 import com.homemakers.homemakers.service.BookingService;
+import jakarta.transaction.Transactional;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-
 import com.homemakers.homemakers.repository.ProviderWorkLogRepository;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @RestController
@@ -22,6 +24,7 @@ public class BookingController {
     private final BookingRepository         bookingRepository;
     private final ReviewRepository          reviewRepository;
     private final ProviderWorkLogRepository workLogRepository;
+    private final BookingMapper             bookingMapper;
 
     private static final Set<BookingStatus> PHONE_VISIBLE_STATUSES = Set.of(
             BookingStatus.CONFIRMED,
@@ -33,11 +36,13 @@ public class BookingController {
     public BookingController(BookingService bookingService,
                              BookingRepository bookingRepository,
                              ProviderWorkLogRepository workLogRepository,
-                             ReviewRepository reviewRepository) {
+                             ReviewRepository reviewRepository,
+                             BookingMapper bookingMapper) {
         this.bookingService    = bookingService;
         this.bookingRepository = bookingRepository;
         this.reviewRepository  = reviewRepository;
         this.workLogRepository = workLogRepository;
+        this.bookingMapper     = bookingMapper;
     }
 
     /* ======================================================
@@ -45,8 +50,10 @@ public class BookingController {
        ====================================================== */
     @PutMapping("/{id}/accept")
     @PreAuthorize("hasRole('PROVIDER')")
-    public Booking acceptBooking(@PathVariable Long id, Authentication authentication) {
-        return bookingService.acceptBooking(id, authentication.getName());
+    @Transactional
+    public ResponseEntity<?> acceptBooking(@PathVariable Long id, Authentication authentication) {
+        Booking b = bookingService.acceptBooking(id, authentication.getName());
+        return ResponseEntity.ok(bookingMapper.toMap(b));
     }
 
     /* ======================================================
@@ -54,8 +61,10 @@ public class BookingController {
        ====================================================== */
     @PutMapping("/{id}/reject")
     @PreAuthorize("hasRole('PROVIDER')")
-    public Booking rejectBooking(@PathVariable Long id, Authentication authentication) {
-        return bookingService.rejectBooking(id, authentication.getName());
+    @Transactional
+    public ResponseEntity<?> rejectBooking(@PathVariable Long id, Authentication authentication) {
+        Booking b = bookingService.rejectBooking(id, authentication.getName());
+        return ResponseEntity.ok(bookingMapper.toMap(b));
     }
 
     /* ======================================================
@@ -63,8 +72,10 @@ public class BookingController {
        ====================================================== */
     @PutMapping("/{id}/start")
     @PreAuthorize("hasRole('PROVIDER')")
-    public Booking startWork(@PathVariable Long id, Authentication authentication) {
-        return bookingService.startWork(id, authentication.getName());
+    @Transactional
+    public ResponseEntity<?> startWork(@PathVariable Long id, Authentication authentication) {
+        Booking b = bookingService.startWork(id, authentication.getName());
+        return ResponseEntity.ok(bookingMapper.toMap(b));
     }
 
     /* ======================================================
@@ -72,12 +83,13 @@ public class BookingController {
        ====================================================== */
     @PutMapping("/{id}/terminate")
     @PreAuthorize("hasAnyRole('PROVIDER','USER','ADMIN')")
-    public Booking terminateBooking(
+    @Transactional
+    public ResponseEntity<?> terminateBooking(
             @PathVariable Long id,
             @RequestBody(required = false) TerminateBookingRequest request) {
-
         String reason = (request != null) ? request.getReason() : null;
-        return bookingService.terminateBooking(id, reason);
+        Booking b = bookingService.terminateBooking(id, reason);
+        return ResponseEntity.ok(bookingMapper.toMap(b));
     }
 
     /* ======================================================
@@ -85,8 +97,10 @@ public class BookingController {
        ====================================================== */
     @PutMapping("/admin/{id}/complete")
     @PreAuthorize("hasRole('ADMIN')")
-    public Booking finalizeBooking(@PathVariable Long id) {
-        return bookingService.finalizeBooking(id);
+    @Transactional
+    public ResponseEntity<?> finalizeBooking(@PathVariable Long id) {
+        Booking b = bookingService.finalizeBooking(id);
+        return ResponseEntity.ok(bookingMapper.toMap(b));
     }
 
     /* ======================================================
@@ -94,8 +108,10 @@ public class BookingController {
        ====================================================== */
     @GetMapping("/user")
     @PreAuthorize("hasRole('USER')")
-    public List<Booking> getUserBookings(Authentication authentication) {
-        return bookingService.getUserBookings(authentication.getName());
+    @Transactional
+    public ResponseEntity<?> getUserBookings(Authentication authentication) {
+        List<Booking> bookings = bookingService.getUserBookings(authentication.getName());
+        return ResponseEntity.ok(bookings.stream().map(bookingMapper::toMap).toList());
     }
 
     /* ======================================================
@@ -103,12 +119,11 @@ public class BookingController {
        ====================================================== */
     @GetMapping("/provider")
     @PreAuthorize("hasRole('PROVIDER')")
+    @Transactional
     public List<BookingResponse> getProviderBookings(Authentication authentication) {
-
         List<Booking> bookings = bookingService.getProviderBookings(authentication.getName());
 
         return bookings.stream().map(booking -> {
-
             List<ProviderWorkLog> logs = workLogRepository.findByBookingId(booking.getId());
 
             int totalDays = 0, chargeableDays = 0, holidays = 0;
@@ -121,7 +136,6 @@ public class BookingController {
             }
 
             BookingStatus bookingStatus = booking.getStatus();
-
             boolean phoneVisible = PHONE_VISIBLE_STATUSES.contains(bookingStatus)
                     && booking.getUser() != null;
 
@@ -137,7 +151,7 @@ public class BookingController {
                     .customerPhone(phoneVisible ? booking.getUser().getPhone() : null)
                     .serviceAddress(booking.getUser() != null ? booking.getUser().getAddress() : null)
                     .customerNote(booking.getCustomerNote())
-                    .terminationReason(bookingStatus == BookingStatus.TERMINATED  // ✅
+                    .terminationReason(bookingStatus == BookingStatus.TERMINATED
                             ? booking.getTerminationReason() : null)
                     .serviceDate(booking.getAvailability() != null
                             ? booking.getAvailability().getDate().toString() : "-")
@@ -153,7 +167,6 @@ public class BookingController {
                     .chargeableDays(chargeableDays)
                     .holidays(holidays)
                     .build();
-
         }).toList();
     }
 
@@ -162,8 +175,10 @@ public class BookingController {
        ====================================================== */
     @GetMapping("/admin/all")
     @PreAuthorize("hasRole('ADMIN')")
-    public List<Booking> getAllBookings() {
-        return bookingService.getAllBookings();
+    @Transactional
+    public ResponseEntity<?> getAllBookings() {
+        List<Booking> bookings = bookingService.getAllBookings();
+        return ResponseEntity.ok(bookings.stream().map(bookingMapper::toMap).toList());
     }
 
     /* ======================================================
@@ -171,9 +186,11 @@ public class BookingController {
        ====================================================== */
     @GetMapping("/user/payment-required")
     @PreAuthorize("hasRole('USER')")
-    public List<Booking> getPaymentRequiredBookings(Authentication auth) {
-        return bookingRepository.findByUser_EmailAndPaymentStatus(
+    @Transactional
+    public ResponseEntity<?> getPaymentRequiredBookings(Authentication auth) {
+        List<Booking> bookings = bookingRepository.findByUser_EmailAndPaymentStatus(
                 auth.getName(), PaymentStatus.PAYMENT_REQUIRED);
+        return ResponseEntity.ok(bookings.stream().map(bookingMapper::toMap).toList());
     }
 
     /* ======================================================
@@ -186,23 +203,50 @@ public class BookingController {
         return bookingService.previewBookingPrice(request);
     }
 
+    /* ======================================================
+       USER – CREATE BOOKING
+       ====================================================== */
     @PostMapping
     @PreAuthorize("hasRole('USER')")
-    public Booking createBooking(@RequestBody BookingPreviewRequestDTO request,
-                                 Authentication authentication) {
-        return bookingService.createBooking(request, authentication.getName());
+    public ResponseEntity<?> createBooking(@RequestBody BookingPreviewRequestDTO request,
+                                           Authentication authentication) {
+        Booking booking = bookingService.createBooking(request, authentication.getName());
+        return ResponseEntity.ok(Map.of(
+                "id",                  booking.getId(),
+                "totalPrice",          booking.getTotalPrice(),
+                "walletEligible",      booking.getWalletEligible() != null ? booking.getWalletEligible() : 0.0,
+                "walletConsentStatus", booking.getWalletConsentStatus() != null
+                        ? booking.getWalletConsentStatus().name() : "PENDING",
+                "paymentStatus",       booking.getPaymentStatus() != null
+                        ? booking.getPaymentStatus().name() : "PENDING"
+        ));
     }
+
     /* ======================================================
        USER – SUBMIT WALLET CONSENT
        ====================================================== */
     @PostMapping("/{id}/wallet-consent")
     @PreAuthorize("hasRole('USER')")
-    public Booking submitWalletConsent(
+    public ResponseEntity<?> submitWalletConsent(
             @PathVariable Long id,
             @RequestParam boolean useWallet,
             Authentication authentication) {
-        return bookingService.submitWalletConsent(id, useWallet, authentication.getName());
+        Booking booking = bookingService.submitWalletConsent(id, useWallet, authentication.getName());
+        return ResponseEntity.ok(Map.of(
+                "bookingId",           booking.getId(),
+                "walletUsed",          booking.getWalletUsed() != null ? booking.getWalletUsed() : 0.0,
+                "finalPayable",        booking.getFinalPayableAmount() != null
+                        ? booking.getFinalPayableAmount() : booking.getTotalPrice(),
+                "walletConsentStatus", booking.getWalletConsentStatus() != null
+                        ? booking.getWalletConsentStatus().name() : "PENDING",
+                "paymentStatus",       booking.getPaymentStatus() != null
+                        ? booking.getPaymentStatus().name() : "PENDING"
+        ));
     }
+
+    /* ======================================================
+       USER – PROVIDER OPTIONS
+       ====================================================== */
     @PostMapping("/provider-options")
     @PreAuthorize("hasRole('USER')")
     public List<ProviderOptionDTO> getProviderOptions(
@@ -215,8 +259,9 @@ public class BookingController {
        ====================================================== */
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('USER','PROVIDER','ADMIN')")
-    public BookingDetailResponse getBookingById(@PathVariable Long id,
-                                                Authentication authentication) {
+    @Transactional
+    public ResponseEntity<?> getBookingById(@PathVariable Long id,
+                                            Authentication authentication) {
         Booking booking = bookingRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Booking not found"));
 
@@ -234,7 +279,9 @@ public class BookingController {
         }
 
         boolean rated = reviewRepository.existsByBooking_Id(booking.getId());
-        return new BookingDetailResponse(booking, totalDays, chargeableDays, absent, leave, rated);
+        return ResponseEntity.ok(
+                bookingMapper.toMap(booking, totalDays, chargeableDays, absent, leave, rated)
+        );
     }
 
     /* ======================================================
