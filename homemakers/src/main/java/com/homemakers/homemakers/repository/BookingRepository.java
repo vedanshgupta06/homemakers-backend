@@ -182,4 +182,9 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Transactional
     @Query("UPDATE Booking b SET b.availability = null WHERE b.availability.id = :slotId")
     void nullifyAvailability(@Param("slotId") Long slotId);
+    List<Booking> findByStatusAndPaymentStatusAndConfirmedAtBefore(
+            BookingStatus status,
+            PaymentStatus paymentStatus,
+            LocalDateTime confirmedAt
+    );
 }

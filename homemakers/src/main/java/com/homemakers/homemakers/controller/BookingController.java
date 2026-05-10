@@ -139,10 +139,7 @@ public class BookingController {
             boolean phoneVisible = PHONE_VISIBLE_STATUSES.contains(bookingStatus)
                     && booking.getUser() != null;
 
-            Double totalAmount = (booking.getFinalPayableAmount() != null
-                    && booking.getFinalPayableAmount() > 0)
-                    ? booking.getFinalPayableAmount()
-                    : booking.getTotalPrice();
+            Double totalAmount = booking.getTotalPrice();
 
             return BookingResponse.builder()
                     .bookingId(booking.getId())
@@ -283,7 +280,13 @@ public class BookingController {
                 bookingMapper.toMap(booking, totalDays, chargeableDays, absent, leave, rated)
         );
     }
-
+    @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasRole('USER')")
+    @Transactional
+    public ResponseEntity<?> cancelBooking(@PathVariable Long id, Authentication authentication) {
+        Booking b = bookingService.cancelBooking(id, authentication.getName());
+        return ResponseEntity.ok(bookingMapper.toMap(b));
+    }
     /* ======================================================
        USER – GET WORK LOGS FOR A BOOKING
        ====================================================== */

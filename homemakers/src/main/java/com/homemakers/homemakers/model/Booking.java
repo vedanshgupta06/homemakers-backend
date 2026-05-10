@@ -16,7 +16,6 @@ public class Booking {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // ✅ LAZY — services fetched only when needed, not on every booking load
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "booking_services", joinColumns = @JoinColumn(name = "booking_id"))
     @Enumerated(EnumType.STRING)
@@ -27,24 +26,27 @@ public class Booking {
     private Double finalPayableAmount;
 
     @Column(nullable = false)
-    private double totalPrice;
+    private double totalPrice;          // base service price (what provider earns)
+
+    @Column(name = "platform_fee")
+    private Double platformFee;         // 5% of totalPrice — kept by platform
+
+    @Column(name = "total_with_fee")
+    private Double totalWithFee;        // totalPrice + platformFee — what user actually pays
 
     private Integer hoursPerDay;
 
     @Column(name = "customer_note", length = 500)
     private String customerNote;
 
-    // ✅ LAZY — user fetched only when accessed
     @ManyToOne(fetch = FetchType.LAZY)
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private User user;
 
-    // ✅ LAZY — provider fetched only when accessed
     @ManyToOne(fetch = FetchType.LAZY)
     @JsonIgnoreProperties({"availabilities", "hibernateLazyInitializer", "handler"})
     private Provider provider;
 
-    // ✅ LAZY — availability fetched only when accessed
     @OneToOne(fetch = FetchType.LAZY, optional = true)
     @JoinColumn(name = "availability_id", unique = true)
     private ProviderAvailability availability;
@@ -59,6 +61,10 @@ public class Booking {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime completedAt;
+
+    // Set when provider accepts — used for payment expiry check (2-day timeout)
+    @Column(name = "confirmed_at")
+    private LocalDateTime confirmedAt;
 
     private LocalDate workStartDate;
     private LocalDate workEndDate;
@@ -115,6 +121,12 @@ public class Booking {
     public double getTotalPrice() { return totalPrice; }
     public void setTotalPrice(double totalPrice) { this.totalPrice = totalPrice; }
 
+    public Double getPlatformFee() { return platformFee; }
+    public void setPlatformFee(Double platformFee) { this.platformFee = platformFee; }
+
+    public Double getTotalWithFee() { return totalWithFee; }
+    public void setTotalWithFee(Double totalWithFee) { this.totalWithFee = totalWithFee; }
+
     public Integer getHoursPerDay() { return hoursPerDay; }
     public void setHoursPerDay(Integer hoursPerDay) { this.hoursPerDay = hoursPerDay; }
 
@@ -149,6 +161,9 @@ public class Booking {
 
     public LocalDateTime getCompletedAt() { return completedAt; }
     public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
+
+    public LocalDateTime getConfirmedAt() { return confirmedAt; }
+    public void setConfirmedAt(LocalDateTime confirmedAt) { this.confirmedAt = confirmedAt; }
 
     public LocalDate getWorkStartDate() { return workStartDate; }
 

@@ -17,8 +17,10 @@ public class BookingMapper {
         map.put("id",                  b.getId());
         map.put("status",              b.getStatus() != null ? b.getStatus().name() : null);
         map.put("paymentStatus",       b.getPaymentStatus() != null ? b.getPaymentStatus().name() : null);
-        map.put("totalPrice",          b.getTotalPrice());
-        map.put("finalPayableAmount",  b.getFinalPayableAmount());
+        map.put("totalPrice",          b.getTotalPrice());           // base service price — provider earns this
+        map.put("platformFee",         b.getPlatformFee());          // 5% platform cut
+        map.put("totalWithFee",        b.getTotalWithFee());         // totalPrice + platformFee — user pays this
+        map.put("finalPayableAmount",  b.getFinalPayableAmount());   // after wallet deduction
         map.put("walletUsed",          b.getWalletUsed());
         map.put("walletEligible",      b.getWalletEligible());
         map.put("walletConsentStatus", b.getWalletConsentStatus() != null ? b.getWalletConsentStatus().name() : null);

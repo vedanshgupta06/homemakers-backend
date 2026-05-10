@@ -160,13 +160,19 @@ public class BookingService {
             availabilityRepository.save(afterSlot);
         }
 
+        // ── Platform fee: 5% of service price, paid by user ──
+        double platformFee   = Math.round(totalMonthlyPrice * 0.05 * 100.0) / 100.0;
+        double totalWithFee  = Math.round((totalMonthlyPrice + platformFee) * 100.0) / 100.0;
+
         Booking booking = new Booking();
         booking.setCreatedAt(LocalDateTime.now());
         booking.setUser(user);
         booking.setProvider(provider);
         booking.setAvailability(savedBookedSlot);
         booking.setServices(services);
-        booking.setTotalPrice(totalMonthlyPrice);
+        booking.setTotalPrice(totalMonthlyPrice);   // base price — what provider earns
+        booking.setPlatformFee(platformFee);         // 5% platform cut
+        booking.setTotalWithFee(totalWithFee);       // what user actually pays
         booking.setStatus(BookingStatus.PENDING);
         booking.setPaymentStatus(PaymentStatus.PENDING);
         booking.setBookingStartTime(requestStart);
@@ -185,11 +191,12 @@ public class BookingService {
         );
 
         double availableWallet = userWalletService.getAvailableBalance(user.getId());
-        double walletEligible  = Math.min(availableWallet, totalMonthlyPrice);
+        // Wallet eligibility is based on totalWithFee — full amount user owes
+        double walletEligible  = Math.min(availableWallet, totalWithFee);
 
         savedBooking.setWalletUsed(0.0);
         savedBooking.setWalletEligible(walletEligible);
-        savedBooking.setFinalPayableAmount(totalMonthlyPrice);
+        savedBooking.setFinalPayableAmount(totalWithFee); // user pays total including fee
         savedBooking.setWalletConsentStatus(WalletConsentStatus.PENDING);
 
         return bookingRepository.save(savedBooking);
@@ -213,18 +220,23 @@ public class BookingService {
             throw new RuntimeException("Wallet consent already submitted");
         }
 
+        // Use totalWithFee (service + platform fee) as the amount user owes
+        double amountOwed = booking.getTotalWithFee() != null
+                ? booking.getTotalWithFee()
+                : booking.getTotalPrice();
+
         if (useWallet) {
             double reserved = userWalletService.reserveAmount(
                     booking.getUser().getId(),
                     booking.getId(),
-                    booking.getTotalPrice()
+                    amountOwed
             );
             booking.setWalletUsed(reserved);
-            booking.setFinalPayableAmount(booking.getTotalPrice() - reserved);
+            booking.setFinalPayableAmount(amountOwed - reserved);
             booking.setWalletConsentStatus(WalletConsentStatus.ACCEPTED);
         } else {
             booking.setWalletUsed(0.0);
-            booking.setFinalPayableAmount(booking.getTotalPrice());
+            booking.setFinalPayableAmount(amountOwed);
             booking.setWalletConsentStatus(WalletConsentStatus.DECLINED);
         }
 
@@ -247,6 +259,7 @@ public class BookingService {
         }
 
         booking.setStatus(BookingStatus.CONFIRMED);
+        booking.setConfirmedAt(LocalDateTime.now()); // used for 2-day payment expiry check
 
         if (booking.getWalletConsentStatus() == WalletConsentStatus.ACCEPTED
                 && booking.getWalletUsed() != null
@@ -403,6 +416,110 @@ public class BookingService {
     }
 
     // =========================================================
+    // USER CANCEL BOOKING
+    // Only allowed when status is PENDING (before provider accepts).
+    // Mirrors rejectBooking slot-restoration logic but is triggered
+    // by the user, not the provider.
+    // =========================================================
+
+    @Transactional
+    public Booking cancelBooking(Long bookingId, String userEmail) {
+
+        Booking booking = bookingRepository
+                .findByIdAndUser_Email(bookingId, userEmail)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        if (booking.getStatus() != BookingStatus.PENDING) {
+            throw new RuntimeException("Only PENDING bookings can be cancelled by the user");
+        }
+
+        booking.setStatus(BookingStatus.CANCELLED);
+
+        // Refund wallet if payment was already made
+        if (booking.getWalletUsed() != null && booking.getWalletUsed() > 0) {
+            userWalletService.releaseReservedAmount(
+                    booking.getUser().getId(), booking.getId(), booking.getWalletUsed()
+            );
+        }
+
+        // Restore the original availability slot
+        Long providerId         = booking.getProvider().getId();
+        Long slotId             = booking.getAvailability() != null ? booking.getAvailability().getId() : null;
+        LocalDate date          = booking.getAvailability() != null ? booking.getAvailability().getDate() : null;
+        LocalTime bookingStart  = booking.getBookingStartTime();
+        LocalTime bookingEnd    = booking.getBookingEndTime();
+        LocalTime originalStart = booking.getOriginalSlotStart();
+        LocalTime originalEnd   = booking.getOriginalSlotEnd();
+        LocalTime bufferedEnd   = bookingEnd != null ? bookingEnd.plusMinutes(BUFFER_MINUTES) : null;
+
+        if (slotId != null && date != null) {
+            // Nullify FK reference before deleting the booked slot
+            entityManager.createNativeQuery(
+                    "UPDATE bookings SET availability_id = NULL WHERE id = :bookingId"
+            ).setParameter("bookingId", bookingId).executeUpdate();
+            entityManager.flush();
+
+            // Delete the booked (inactive) slot
+            entityManager.createNativeQuery(
+                    "DELETE FROM provider_availability WHERE id = :id"
+            ).setParameter("id", slotId).executeUpdate();
+            entityManager.flush();
+
+            // Check if a split remainder (after-slot) exists
+            Long afterSlotId = bufferedEnd == null ? null :
+                    (Long) entityManager.createNativeQuery(
+                                    "SELECT id FROM provider_availability " +
+                                            "WHERE provider_id = :pid AND date = :date AND start_time = :start LIMIT 1"
+                            )
+                            .setParameter("pid", providerId)
+                            .setParameter("date", date)
+                            .setParameter("start", bufferedEnd)
+                            .getResultStream().findFirst().orElse(null);
+
+            if (afterSlotId != null) {
+                // Check if the after-slot is itself booked by another booking
+                Long bookedByOther = (Long) entityManager.createNativeQuery(
+                        "SELECT id FROM bookings WHERE availability_id = :aid LIMIT 1"
+                ).setParameter("aid", afterSlotId).getResultStream().findFirst().orElse(null);
+
+                if (bookedByOther == null) {
+                    // Safe to delete and restore full original slot
+                    entityManager.createNativeQuery(
+                            "DELETE FROM provider_availability WHERE id = :id"
+                    ).setParameter("id", afterSlotId).executeUpdate();
+                    saveAvailabilityNative(
+                            providerId, date,
+                            originalStart != null ? originalStart : bookingStart,
+                            originalEnd   != null ? originalEnd   : bookingEnd,
+                            true
+                    );
+                } else {
+                    // After-slot is booked — only restore the before portion
+                    restoreBeforeSlot(providerId, date, bookingStart, originalStart);
+                }
+            } else {
+                // No after-slot — restore original slot in full or just before portion
+                if (originalStart != null && originalStart.isBefore(bookingStart)) {
+                    restoreBeforeSlot(providerId, date, bookingStart, originalStart);
+                } else {
+                    saveAvailabilityNative(
+                            providerId, date,
+                            originalStart != null ? originalStart : bookingStart,
+                            originalEnd   != null ? originalEnd   : bookingEnd,
+                            true
+                    );
+                }
+            }
+        }
+
+        notificationService.bookingCancelled(
+                booking.getProvider(), booking.getId(), booking.getUser().getName()
+        );
+
+        return bookingRepository.save(booking);
+    }
+
+    // =========================================================
     // TERMINATE BOOKING
     // =========================================================
 
@@ -510,49 +627,41 @@ public class BookingService {
     // applied to every existing slot in the 30-day window.
     // =========================================================
     private void splitAndLockOverlappingFutureSlots(Booking booking) {
-        Provider provider   = booking.getProvider();
+        Provider provider    = booking.getProvider();
         LocalDate anchorDate = booking.getAvailability().getDate();
         LocalDate endDate    = anchorDate.plusDays(SERVICE_DAYS);
         LocalTime bookStart  = booking.getBookingStartTime();
         LocalTime bookEnd    = booking.getBookingEndTime();
         LocalTime bufferedEnd = bookEnd.plusMinutes(BUFFER_MINUTES);
         String customerName  = booking.getUser().getName();
+        Long anchorSlotId    = booking.getAvailability().getId(); // ← NEW
 
         if (bookStart == null || bookEnd == null) return;
 
-        // Fetch all provider slots.
-        // We process ALL slots in the 30-day window EXCEPT the anchor date itself
-        // (which was already handled in createBooking).
-        // This includes slots BEFORE the anchor (e.g. May 1 when anchor is May 2)
-        // because those were added by the provider and must also be split+locked.
         List<ProviderAvailability> allSlots = availabilityRepository.findByProvider(provider);
 
         for (ProviderAvailability existingSlot : allSlots) {
 
-            // Skip the anchor date — already fully handled in createBooking
-            if (existingSlot.getDate().isEqual(anchorDate)) continue;
-
-            // Only within the 30-day service window (before OR after anchor)
-            if (existingSlot.getDate().isAfter(endDate)) continue;
-
-            // Only active (free) slots — skip already-booked ones
-            if (!existingSlot.isActive()) continue;
+            // ── Guards ────────────────────────────────────────────────────────────
+            if (existingSlot.getId().equals(anchorSlotId)) continue;           // ← NEW: skip anchor slot (booking FK points here)
+            if (existingSlot.getDate().isEqual(anchorDate)) continue;          // skip anchor date (handled in createBooking)
+            if (existingSlot.getDate().isAfter(endDate)) continue;             // outside 30-day window
+            if (!existingSlot.isActive()) continue;                            // already locked/booked
+            if (bookingRepository.existsByAvailability(existingSlot)) continue; // ← NEW: FK safety — another booking references this slot
+            // ─────────────────────────────────────────────────────────────────────
 
             LocalTime slotStart = existingSlot.getStartTime();
             LocalTime slotEnd   = existingSlot.getEndTime();
 
-            // Check overlap: slot must overlap with booking time window
             boolean overlaps = slotStart.isBefore(bookEnd) && slotEnd.isAfter(bookStart);
             if (!overlaps) continue;
 
-            // Delete the original slot — we'll replace it with up to 3 parts
             availabilityRepository.delete(existingSlot);
             availabilityRepository.flush();
 
             LocalDate slotDate = existingSlot.getDate();
 
-            // Part 1 — Before portion: free time before booking starts
-            // e.g. slot is 8AM–1PM, booking is 9–11AM → save 8AM–9AM as free
+            // Part 1 — Before portion
             if (slotStart.isBefore(bookStart)) {
                 ProviderAvailability beforePart = new ProviderAvailability();
                 beforePart.setProvider(provider);
@@ -563,8 +672,7 @@ public class BookingService {
                 availabilityRepository.save(beforePart);
             }
 
-            // Part 2 — Locked portion: the booking window, marked inactive with range
-            // Clamped to the actual slot boundaries in case booking extends beyond slot
+            // Part 2 — Locked portion
             LocalTime lockedStart = bookStart.isBefore(slotStart) ? slotStart : bookStart;
             LocalTime lockedEnd   = bookEnd.isAfter(slotEnd)      ? slotEnd   : bookEnd;
 
@@ -579,8 +687,7 @@ public class BookingService {
             lockedPart.setBookingCustomerName(customerName);
             availabilityRepository.save(lockedPart);
 
-            // Part 3 — After portion (split remainder): free time after booking + buffer
-            // e.g. slot is 9AM–1PM, booking is 9–11AM → save 11:15AM–1PM as free
+            // Part 3 — After portion
             if (bufferedEnd.isBefore(slotEnd)) {
                 ProviderAvailability afterPart = new ProviderAvailability();
                 afterPart.setProvider(provider);
@@ -591,7 +698,7 @@ public class BookingService {
                 availabilityRepository.save(afterPart);
             }
 
-            System.out.println("✂️ Split slot on " + slotDate
+            System.out.println("Split slot on " + slotDate
                     + " [" + slotStart + "-" + slotEnd + "]"
                     + " → locked [" + lockedStart + "-" + lockedEnd + "]"
                     + (slotStart.isBefore(bookStart) ? " + before [" + slotStart + "-" + bookStart + "]" : "")
