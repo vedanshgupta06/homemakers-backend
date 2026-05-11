@@ -190,5 +190,5 @@ FROM eclipse-temurin:17-jre-alpine
 ---
 
 <div align="center">
-Made with ☕ by <a href="https://github.com/vedanshgupta06">Vedansh Gupta</a>
+Made by <a href="https://github.com/vedanshgupta06">Vedansh Gupta</a>
 </div>
