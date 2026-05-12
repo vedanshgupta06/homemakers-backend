@@ -10,16 +10,11 @@ import com.homemakers.homemakers.repository.ProviderRepository;
 import com.homemakers.homemakers.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
-
-import java.io.File;
-import java.util.HashSet;
-import java.util.List;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.HashSet;
+import java.util.List;
 
 @Service
 public class ProviderService {
@@ -27,15 +22,18 @@ public class ProviderService {
     private final ProviderRepository providerRepo;
     private final UserRepository userRepo;
     private final ProviderAvailabilityRepository availabilityRepo;
+    private final CloudinaryService cloudinaryService;
 
     public ProviderService(
             ProviderRepository providerRepo,
             UserRepository userRepo,
-            ProviderAvailabilityRepository availabilityRepo
+            ProviderAvailabilityRepository availabilityRepo,
+            CloudinaryService cloudinaryService
     ) {
-        this.providerRepo = providerRepo;
-        this.userRepo = userRepo;
-        this.availabilityRepo = availabilityRepo;
+        this.providerRepo      = providerRepo;
+        this.userRepo          = userRepo;
+        this.availabilityRepo  = availabilityRepo;
+        this.cloudinaryService = cloudinaryService;
     }
 
     // =====================================================
@@ -76,7 +74,6 @@ public class ProviderService {
         if (request.getHomeLongitude() != null) {
             provider.setHomeLongitude(request.getHomeLongitude());
         }
-        // Default radius to 10 km if not provided
         provider.setTravelRadiusKm(
                 request.getTravelRadiusKm() != null ? request.getTravelRadiusKm() : 10
         );
@@ -186,7 +183,7 @@ public class ProviderService {
     }
 
     // =====================================================
-    // UPLOAD PROFILE PHOTO
+    // UPLOAD PROFILE PHOTO — Cloudinary
     // =====================================================
     @Transactional
     public Provider uploadProfilePhoto(
@@ -197,21 +194,15 @@ public class ProviderService {
         Provider provider = providerRepo.findByUser_Email(email)
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
-        String uploadDir = "uploads/providers/";
-        File directory = new File(uploadDir);
-        if (!directory.exists()) directory.mkdirs();
-
-        String fileName = provider.getId() + "_" + file.getOriginalFilename();
-        Path filePath = Paths.get(uploadDir + fileName);
-        Files.write(filePath, file.getBytes());
-
-        provider.setProfilePhotoUrl("/providers/" + fileName);
+        // Uploads to Cloudinary and returns full https://res.cloudinary.com/... URL
+        String imageUrl = cloudinaryService.uploadFile(file, "homemakers/providers");
+        provider.setProfilePhotoUrl(imageUrl);
 
         return providerRepo.save(provider);
     }
 
     // =====================================================
-    // UPLOAD DOCUMENTS
+    // UPLOAD DOCUMENTS — Cloudinary
     // =====================================================
     @Transactional
     public Provider uploadDocuments(
@@ -223,18 +214,12 @@ public class ProviderService {
         Provider provider = providerRepo.findByUser_Email(email)
                 .orElseThrow(() -> new RuntimeException("Provider not found"));
 
-        String uploadDir = "uploads/provider-documents/";
-        File directory = new File(uploadDir);
-        if (!directory.exists()) directory.mkdirs();
+        // Uploads to Cloudinary and returns full https://res.cloudinary.com/... URLs
+        String idProofUrl      = cloudinaryService.uploadFile(idProof,      "homemakers/documents");
+        String addressProofUrl = cloudinaryService.uploadFile(addressProof, "homemakers/documents");
 
-        String idProofName      = provider.getId() + "_id_" + idProof.getOriginalFilename();
-        String addressProofName = provider.getId() + "_address_" + addressProof.getOriginalFilename();
-
-        Files.write(Paths.get(uploadDir + idProofName),      idProof.getBytes());
-        Files.write(Paths.get(uploadDir + addressProofName), addressProof.getBytes());
-
-        provider.setIdProofUrl("/provider-documents/" + idProofName);
-        provider.setAddressProofUrl("/provider-documents/" + addressProofName);
+        provider.setIdProofUrl(idProofUrl);
+        provider.setAddressProofUrl(addressProofUrl);
 
         return providerRepo.save(provider);
     }
