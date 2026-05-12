@@ -29,7 +29,7 @@ public class AdminController {
 
     @GetMapping("/bookings")
     public List<Booking> getAllBookings() {
-        return bookingRepository.findAll();
+        return bookingRepository.findAllWithDetails();
     }
 //    @GetMapping("/providers")
 //    public List<Provider> getAllProviders() {

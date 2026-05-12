@@ -33,6 +33,17 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     List<Booking> findByProviderAndStatus(Provider provider, BookingStatus status);
 
     @Query("""
+    SELECT DISTINCT b FROM Booking b
+    LEFT JOIN FETCH b.availability
+    LEFT JOIN FETCH b.provider p
+    LEFT JOIN FETCH p.user
+    LEFT JOIN FETCH b.user
+    LEFT JOIN FETCH b.services
+""")
+    List<Booking> findAllWithDetails();
+
+
+    @Query("""
         SELECT b FROM Booking b
         WHERE b.provider = :provider
         AND b.status = com.homemakers.homemakers.model.BookingStatus.COMPLETED
