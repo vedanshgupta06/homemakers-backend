@@ -78,7 +78,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/payments/webhook").permitAll()
 
                         // PUBLIC
-                        .requestMatchers("/providers/**", "/provider-documents/**").permitAll()
+                        .requestMatchers(
+                                "/providers/**",
+                                "/provider-documents/**",
+                                "/uploads/**"
+                        ).permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/users/register").permitAll()
                         .requestMatchers("/api/users/profile").authenticated()
