@@ -25,7 +25,7 @@ public class Provider {
     // =====================================
     // SERVICES OFFERED
     // =====================================
-    @ElementCollection
+    @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(
             name = "provider_services",
             joinColumns = @JoinColumn(name = "provider_id")
@@ -58,7 +58,7 @@ public class Provider {
     private Boolean willingToTravel = false;
 
     // Pincodes this provider has explicitly opted into serving
-    @ElementCollection
+    @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(
             name = "provider_serviceable_pincodes",
             joinColumns = @JoinColumn(name = "provider_id")
