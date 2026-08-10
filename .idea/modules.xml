@@ -2,7 +2,8 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/homemakers.iml" filepath="$PROJECT_DIR$/.idea/homemakers.iml" />
+      <module fileurl="file://$PROJECT_DIR$/homemakers/homemakers.iml" filepath="$PROJECT_DIR$/homemakers/homemakers.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/homemakers-backend.iml" filepath="$PROJECT_DIR$/.idea/homemakers-backend.iml" />
     </modules>
   </component>
 </project>

@@ -76,7 +76,7 @@ public class SecurityConfig {
 
                         // ✅ STRIPE WEBHOOK (MUST BE FIRST)
                         .requestMatchers("/api/payments/webhook").permitAll()
-
+                        .requestMatchers("/health").permitAll()
                         // PUBLIC
                         .requestMatchers(
                                 "/providers/**",
